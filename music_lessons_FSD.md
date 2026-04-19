@@ -41,8 +41,10 @@ All settings are stored in `config.json` and loaded at startup. Missing keys fal
 | `flat_y_offset` | `0` | Y offset of flat symbol from note centre, in debug pixels |
 | `ledger_above_y_offset` | `0` | Y offset of ledger line relative to note centre when above the staff, in debug pixels |
 | `ledger_below_y_offset` | `0` | Y offset of ledger line relative to note centre when below the staff, in debug pixels |
+| `note_stats_Staff` | `{}` | Per-note adaptive stats for Staff mode (keyed by MIDI number string) |
+| `note_stats_Letters` | `{}` | Per-note adaptive stats for Letters mode (keyed by MIDI number string) |
 
-Config is saved immediately whenever any setting changes (range selectors, mic threshold, mic device, note scale, debug save).
+Config is saved immediately whenever any setting changes (range selectors, mic threshold, mic device, note scale, debug save, note stats update).
 
 ------
 
@@ -105,6 +107,7 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 ### Mode Selection
 - Radio buttons: **Staff** / **Letters**
 - **Start** button (green) launches the selected mode
+- Each mode maintains independent note stats; switching modes does not affect the other mode's history
 
 ### Debug Selection
 - Radio buttons: **Note on scale** / **sharp location** / **flat location** / **notes above scale** / **notes below scale**
@@ -137,6 +140,7 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 - When `RMS > mic_threshold` **and** the detected pitch matches the target note (enharmonic equivalence via MIDI number), a hold timer starts
 - When the note has been held for `note_duration` seconds continuously, the background flashes lime green (#32cd32) for 400 ms, then the next note is shown
 - If the note is released or changes, the hold timer resets
+- On a correct note, elapsed time (from when the note was displayed to when the hold completed) is recorded and the note's adaptive stats are updated (see Adaptive Note Selection)
 - Progress bar value advances by 1 per correct note
 - After all notes are completed, a "Lesson Complete!" screen is shown with a "← Menu" button
 
@@ -144,7 +148,44 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 
 ## Letters Mode
 
-Identical flow to Staff mode but displays the note name as large bold text (font size 80) instead of a staff image.
+Identical flow to Staff mode but displays the note name as large bold text (font size 80) instead of a staff image. Letters mode has its own independent note stats (`note_stats_Letters`).
+
+------
+
+## Adaptive Note Selection
+
+Each mode tracks per-note statistics that bias which notes appear in future lessons. Stats are stored in `config.json` under `note_stats_Staff` and `note_stats_Letters`, keyed by MIDI number string. Each entry has four fields:
+
+| Field | Initial value | Description |
+|-------|---------------|-------------|
+| `avg_time` | `5.0` | Running average of adjusted play time in seconds |
+| `count` | `0` | Number of times this note has been played |
+| `win_streak` | `0` | Consecutive notes played faster than average (max 3) |
+| `loss_streak` | `0` | Consecutive notes played slower than average (max 3) |
+
+### Note weighting
+At lesson start, each note in the pool is assigned a weight equal to its `avg_time` (default 5.0 for unseen notes). Notes are drawn via weighted random selection, so notes with a higher average time appear proportionally more often.
+
+### 2-note cooldown
+The same note (by MIDI number) cannot appear until at least 2 other notes have been played. The sequence is built iteratively: before each pick, the last 2 MIDI numbers chosen are excluded from the available pool. If the pool has 2 or fewer distinct notes the cooldown is silently bypassed.
+
+### Stats update (on each correct note)
+Let `elapsed` = wall-clock seconds from note display to successful hold completion.
+
+1. **Cap:** `capped = min(elapsed, 5.0)`
+2. **Classify:**
+   - If `capped > avg_time` (slower than average — loss):
+     - Reset `win_streak` to 0; increment `loss_streak` (max 3)
+     - `streak_mult = loss_streak / 3`
+     - `adjusted = avg_time + (capped − avg_time) × streak_mult`
+   - If `capped ≤ avg_time` (faster than average — win):
+     - Reset `loss_streak` to 0; increment `win_streak` (max 3)
+     - `streak_mult = win_streak / 3`
+     - `adjusted = avg_time − (avg_time − capped) × streak_mult`
+3. **Running average:** `avg_time = (avg_time × count + adjusted) / (count + 1)`; `count += 1`
+4. Config is saved immediately after each update.
+
+The streak multiplier scales the push toward or away from the average: a streak of 1/3 produces a gentle nudge, 3/3 produces the full difference. The cap of 5.0 s prevents a single very slow attempt from inflating the average unboundedly.
 
 ------
 

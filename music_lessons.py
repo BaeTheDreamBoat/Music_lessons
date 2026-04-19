@@ -398,9 +398,19 @@ class App:
         if not pool:
             return
         n = self.cfg["num_notes"]
-        self._seq   = [self._pick_display(random.choice(pool)) for _ in range(n)]
-        self._idx   = 0
-        self._mode  = self.mode_var.get()
+        self._idx  = 0
+        self._mode = self.mode_var.get()
+        stats      = self.cfg.setdefault(f"note_stats_{self._mode}", {})
+        self._seq  = []
+        recent: list[int] = []
+        for _ in range(n):
+            available = [note for note in pool if note_to_midi(note) not in recent] or pool
+            weights   = [stats.get(str(note_to_midi(note)), {}).get("avg_time", 5.0) for note in available]
+            chosen    = random.choices(available, weights=weights, k=1)[0]
+            self._seq.append(self._pick_display(chosen))
+            recent.append(note_to_midi(chosen))
+            if len(recent) > 2:
+                recent.pop(0)
         if self._mode == "Staff":
             self._staff_screen()
         else:
@@ -460,6 +470,7 @@ class App:
         note = self._seq[self._idx]
         self._render_staff_note(note)
         self._prog['value'] = self._idx
+        self._note_start_time = time.monotonic()
         self._listen(note)
 
     def _render_staff_note(self, note):
@@ -544,6 +555,7 @@ class App:
         self._bg.config(bg="white")
         self._lbl.config(text=note, bg="white", fg="black")
         self._prog['value'] = self._idx
+        self._note_start_time = time.monotonic()
         self._listen(note)
 
     # ── Note listening ─────────────────────────────────────────────────────────
@@ -573,7 +585,33 @@ class App:
 
         self.root.after(50, lambda: self._poll(dur, thr))
 
+    def _update_note_stats(self, note, elapsed):
+        midi = note_to_midi(note)
+        key  = str(midi)
+        stats = self.cfg.setdefault(f"note_stats_{self._mode}", {})
+        if key not in stats:
+            stats[key] = {"avg_time": 5.0, "count": 0, "win_streak": 0, "loss_streak": 0}
+        s   = stats[key]
+        avg = s["avg_time"]
+        capped = min(elapsed, 5.0)
+        if capped > avg:
+            s["win_streak"] = 0
+            s["loss_streak"] = min(s["loss_streak"] + 1, 3)
+            streak_mult = s["loss_streak"] / 3
+            adjusted = avg + (capped - avg) * streak_mult
+        else:
+            s["loss_streak"] = 0
+            s["win_streak"] = min(s["win_streak"] + 1, 3)
+            streak_mult = s["win_streak"] / 3
+            adjusted = avg - (avg - capped) * streak_mult
+        count = s["count"]
+        s["avg_time"] = (avg * count + adjusted) / (count + 1)
+        s["count"] += 1
+        save_config(self.cfg)
+
     def _hit(self):
+        elapsed = time.monotonic() - getattr(self, '_note_start_time', time.monotonic())
+        self._update_note_stats(self._target, elapsed)
         self._bg.config(bg="#32cd32")
         for w in (self._cv, self._lbl) if hasattr(self, '_lbl') else (self._cv,):
             try:
