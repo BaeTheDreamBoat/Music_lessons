@@ -1,6 +1,6 @@
 # Functional Specification Document
 
-## Music Lessons — Version 2
+## Music Lessons — Version 2.2
 
 ------
 
@@ -252,7 +252,12 @@ The absolute playable range is **B3** (lowest) to **C7** (highest). The game's a
 ## File Layout
 
 ```
-music_lessons.py      — main script
+music_lessons.py      — entry point; constants, utilities, AudioEngine, App coordinator
+menu.py               — MainMenu GUI and lesson-launch logic
+staff_lesson.py       — StaffLesson: staff rendering and note detection loop
+note_lesson.py        — LettersLesson: large-text note display and detection loop
+progress_report.py    — BasLesson (shared audio loop), build_sequence, update_note_stats
+debug_menus.py        — DebugMenus: all five calibration screens
 config.json           — persistent settings (auto-created)
 images/
     staff.png
@@ -261,6 +266,21 @@ images/
     sharp.png
     flat.png
 ```
+
+### Module responsibilities
+
+| Module | Key exports |
+|---|---|
+| `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config`, `AudioEngine`, `App` |
+| `menu.py` | `MainMenu` — builds the main menu, mic bar, and range/mode selectors; delegates lesson and debug launch |
+| `staff_lesson.py` | `StaffLesson(BasLesson)` — scales and renders the treble clef staff, note head, ledger lines, and accidentals |
+| `note_lesson.py` | `LettersLesson(BasLesson)` — displays the note name as large bold text |
+| `progress_report.py` | `BasLesson` — shared audio-polling loop (`_listen`, `_poll`, `_hit`, `_advance`, `_complete`); `build_sequence` — weighted adaptive sequence builder; `update_note_stats` — per-note streak/average updater |
+| `debug_menus.py` | `DebugMenus` — five debug/calibration screens (note on scale, sharp, flat, ledger above/below) |
+
+### Import strategy
+
+`music_lessons.py` uses **lazy imports** (inside methods) when loading sub-modules, so each sub-module can safely do top-level `from music_lessons import …` without circular-import issues. Sub-modules never import from each other except `staff_lesson` and `note_lesson`, which both inherit from `progress_report.BasLesson`.
 
 ------
 

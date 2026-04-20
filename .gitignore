@@ -1,2 +1,3 @@
 images/
 config.json
+__pycache__/
