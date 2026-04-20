@@ -23,6 +23,20 @@ ALL_NOTES     = [f"{n}{o}" for o in range(0, 9) for n in NOTE_NAMES]
 SHARP_TO_FLAT = {'C#':'Db','D#':'Eb','F#':'Gb','G#':'Ab','A#':'Bb'}
 FLAT_TO_SHARP = {v: k for k, v in SHARP_TO_FLAT.items()}
 
+# Combo-box display list: chromatic notes shown as "C#4/Db4", naturals as "C4"
+NOTE_DISPLAY = []
+NOTE_DISPLAY_TO_SHARP = {}   # "C#4/Db4" -> "C#4",  "C4" -> "C4"
+for _n in ALL_NOTES:
+    if len(_n) >= 3 and _n[1] == '#':
+        _flat = f"{SHARP_TO_FLAT[_n[:2]]}{_n[2:]}"
+        _disp = f"{_n}/{_flat}"
+        NOTE_DISPLAY.append(_disp)
+        NOTE_DISPLAY_TO_SHARP[_disp] = _n
+    else:
+        NOTE_DISPLAY.append(_n)
+        NOTE_DISPLAY_TO_SHARP[_n] = _n
+SHARP_TO_DISPLAY = {v: k for k, v in NOTE_DISPLAY_TO_SHARP.items()}
+
 DEFAULT_CONFIG = {
     "lower_note":            "C4",
     "upper_note":            "B5",
@@ -269,13 +283,13 @@ class App:
         # Note range
         tk.Label(f, text="Note Range:").grid(row=1, column=0, sticky='e')
         tk.Label(f, text="Lower:").grid(row=1, column=1, sticky='e')
-        self.lo_var = tk.StringVar(value=self.cfg["lower_note"])
-        ttk.Combobox(f, textvariable=self.lo_var, values=ALL_NOTES,
-                     width=7, state='readonly').grid(row=1, column=2, padx=4)
+        self.lo_var = tk.StringVar(value=SHARP_TO_DISPLAY.get(self.cfg["lower_note"], self.cfg["lower_note"]))
+        ttk.Combobox(f, textvariable=self.lo_var, values=NOTE_DISPLAY,
+                     width=10, state='readonly').grid(row=1, column=2, padx=4)
         tk.Label(f, text="Upper:").grid(row=1, column=3, sticky='e')
-        self.hi_var = tk.StringVar(value=self.cfg["upper_note"])
-        ttk.Combobox(f, textvariable=self.hi_var, values=ALL_NOTES,
-                     width=7, state='readonly').grid(row=1, column=4, padx=4)
+        self.hi_var = tk.StringVar(value=SHARP_TO_DISPLAY.get(self.cfg["upper_note"], self.cfg["upper_note"]))
+        ttk.Combobox(f, textvariable=self.hi_var, values=NOTE_DISPLAY,
+                     width=10, state='readonly').grid(row=1, column=4, padx=4)
         self.lo_var.trace_add("write", lambda *_: self._save_range())
         self.hi_var.trace_add("write", lambda *_: self._save_range())
 
@@ -351,8 +365,8 @@ class App:
                   command=self._start_debug).grid(row=11, column=5, padx=8)
 
     def _save_range(self):
-        self.cfg["lower_note"] = self.lo_var.get()
-        self.cfg["upper_note"] = self.hi_var.get()
+        self.cfg["lower_note"] = NOTE_DISPLAY_TO_SHARP.get(self.lo_var.get(), self.lo_var.get())
+        self.cfg["upper_note"] = NOTE_DISPLAY_TO_SHARP.get(self.hi_var.get(), self.hi_var.get())
         save_config(self.cfg)
 
     def _save_lesson_cfg(self):
@@ -401,13 +415,28 @@ class App:
         self._idx  = 0
         self._mode = self.mode_var.get()
         stats      = self.cfg.setdefault(f"note_stats_{self._mode}", {})
+
+        # Expand pool so each chromatic note appears as both its sharp and flat spelling
+        expanded: list[str] = []
+        seen: set[int] = set()
+        for note in pool:
+            midi = note_to_midi(note)
+            if midi not in seen:
+                seen.add(midi)
+                name, oct_ = parse_note(note)
+                if name in SHARP_TO_FLAT:
+                    expanded.append(note)                           # sharp spelling
+                    expanded.append(f"{SHARP_TO_FLAT[name]}{oct_}")  # flat spelling
+                else:
+                    expanded.append(note)
+
         self._seq  = []
         recent: list[int] = []
         for _ in range(n):
-            available = [note for note in pool if note_to_midi(note) not in recent] or pool
-            weights   = [stats.get(str(note_to_midi(note)), {}).get("avg_time", 5.0) for note in available]
+            available = [note for note in expanded if note_to_midi(note) not in recent] or expanded
+            weights   = [stats.get(note, {}).get("avg_time", 5.0) for note in available]
             chosen    = random.choices(available, weights=weights, k=1)[0]
-            self._seq.append(self._pick_display(chosen))
+            self._seq.append(chosen)
             recent.append(note_to_midi(chosen))
             if len(recent) > 2:
                 recent.pop(0)
@@ -586,8 +615,7 @@ class App:
         self.root.after(50, lambda: self._poll(dur, thr))
 
     def _update_note_stats(self, note, elapsed):
-        midi = note_to_midi(note)
-        key  = str(midi)
+        key   = note  # display name is the key (C#4 and Db4 tracked separately)
         stats = self.cfg.setdefault(f"note_stats_{self._mode}", {})
         if key not in stats:
             stats[key] = {"avg_time": 5.0, "count": 0, "win_streak": 0, "loss_streak": 0}

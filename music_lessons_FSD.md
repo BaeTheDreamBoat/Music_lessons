@@ -77,9 +77,10 @@ All images (note, sharp, flat, line) are scaled by `sf` from their debug-referen
 The window opens at 920×740. The main menu is a grid layout with the following controls:
 
 ### Note Range
-- **Lower** and **Upper** combo boxes, read-only, listing every note from C0–B8 in scientific pitch notation (chromatic, sharps only in the list: `C4`, `C#4`, `D4`, …)
+- **Lower** and **Upper** combo boxes, read-only, listing every note from C0–B8 in scientific pitch notation; chromatic notes are displayed with both spellings (e.g. `C#4/Db4`), natural notes as plain names (e.g. `C4`)
+- The underlying config stores the sharp spelling (e.g. `C#4`); the display form is converted on load and save
 - Selection is saved to config immediately on change
-- Both bounds are inclusive; the lesson draws randomly from the full chromatic range between them
+- Both bounds are inclusive; the lesson draws from both sharp and flat spellings of every chromatic note in the range
 
 ### Number of Notes
 - Spinbox, range 1–200, default 10
@@ -123,7 +124,7 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 - "← Menu" button at the bottom
 
 ### Note rendering
-1. A random note is chosen from the configured chromatic range. Accidentals are spelt as sharps or flats with equal probability (e.g. C#4 may display as C#4 or Db4).
+1. A note is chosen from the expanded pool (see Adaptive Note Selection). Each chromatic pitch is represented as two separate entries — its sharp spelling and its flat spelling — so C#4 and Db4 are distinct choices with independent stats.
 2. The scale factor `sf` is computed for the current canvas height (see Image Scaling Model).
 3. The treble clef staff image is drawn centred vertically in the canvas.
 4. The note head is drawn at the correct diatonic position:
@@ -163,13 +164,18 @@ Each mode tracks per-note statistics that bias which notes appear in future less
 | `win_streak` | `0` | Consecutive notes played faster than average (max 3) |
 | `loss_streak` | `0` | Consecutive notes played slower than average (max 3) |
 
+### Expanded pool
+Before building the sequence, the chromatic note pool is expanded so every chromatic pitch appears as **two entries** — its sharp spelling and its flat spelling (e.g. `C#4` and `Db4`). Natural notes appear once. Each entry has its own independent stats, so `C#4` and `Db4` can accumulate different average times even though they produce the same pitch.
+
 ### Note weighting
-At lesson start, each note in the pool is assigned a weight equal to its `avg_time` (default 5.0 for unseen notes). Notes are drawn via weighted random selection, so notes with a higher average time appear proportionally more often.
+Each entry in the expanded pool is assigned a weight equal to its `avg_time` (default 5.0 for unseen entries). Notes are drawn via weighted random selection, so entries with a higher average time appear proportionally more often.
 
 ### 2-note cooldown
-The same note (by MIDI number) cannot appear until at least 2 other notes have been played. The sequence is built iteratively: before each pick, the last 2 MIDI numbers chosen are excluded from the available pool. If the pool has 2 or fewer distinct notes the cooldown is silently bypassed.
+The same pitch (by MIDI number) cannot appear — in either spelling — until at least 2 other pitches have been played. The sequence is built iteratively: before each pick, the last 2 MIDI numbers chosen are excluded from the available pool. If the pool has 2 or fewer distinct pitches the cooldown is silently bypassed.
 
 ### Stats update (on each correct note)
+Stats are keyed by the **display name** of the note (e.g. `"C#4"` or `"Db4"`), not by MIDI number, so enharmonic spellings are tracked independently.
+
 Let `elapsed` = wall-clock seconds from note display to successful hold completion.
 
 1. **Cap:** `capped = min(elapsed, 5.0)`
