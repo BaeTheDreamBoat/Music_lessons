@@ -3,6 +3,7 @@
 
 import json
 import os
+import time
 import threading
 
 import numpy as np
@@ -37,8 +38,12 @@ SHARP_TO_DISPLAY = {v: k for k, v in NOTE_DISPLAY_TO_SHARP.items()}
 DEFAULT_CONFIG = {
     "lower_note":            "C4",
     "upper_note":            "B5",
+    "sound_lower_note":      "C4",
+    "sound_upper_note":      "B4",
     "num_notes":             10,
     "note_duration":         2.0,
+    "tone_duration":         1.5,
+    "tone_volume":           0.5,
     "mic_threshold":         0.02,
     "mic_device_index":      None,
     "note_scale":            1.0,
@@ -123,11 +128,12 @@ class AudioEngine:
     RATE  = 44100
 
     def __init__(self):
-        self.pa      = pyaudio.PyAudio()
-        self.stream  = None
-        self._vol    = 0.0
-        self._note   = None
-        self._lock   = threading.Lock()
+        self.pa         = pyaudio.PyAudio()
+        self.stream     = None
+        self._vol       = 0.0
+        self._note      = None
+        self._lock      = threading.Lock()
+        self._play_stop = threading.Event()
 
     def get_input_devices(self):
         devs = []
@@ -180,6 +186,46 @@ class AudioEngine:
             return None
         return freq_to_note(freq)
 
+    def play_tone(self, note, duration, volume=0.5):
+        """Synthesize and play note for duration seconds (non-blocking). Interrupts any current tone."""
+        self._play_stop.set()
+        stop = threading.Event()
+        self._play_stop = stop
+        freq = 440.0 * 2.0 ** ((note_to_midi(note) - 69) / 12.0)
+        threading.Thread(target=self._play_blocking, args=(freq, duration, volume, stop), daemon=True).start()
+
+    def _play_blocking(self, freq, duration, volume, stop):
+        n = int(self.RATE * duration)
+        samples = (volume * np.sin(2 * np.pi * freq * np.linspace(0, duration, n, endpoint=False))).astype(np.float32)
+        fade = min(int(self.RATE * 0.02), n // 2)
+        samples[:fade]  *= np.linspace(0, 1, fade, dtype=np.float32)
+        samples[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
+
+        pos = [0]
+
+        def callback(_in_data, frame_count, _time_info, _status):
+            if stop.is_set():
+                return (np.zeros(frame_count, dtype=np.float32).tobytes(), pyaudio.paAbort)
+            i = pos[0]
+            chunk = samples[i:i + frame_count]
+            if len(chunk) < frame_count:
+                out = np.zeros(frame_count, dtype=np.float32)
+                out[:len(chunk)] = chunk
+                pos[0] = n
+                return (out.tobytes(), pyaudio.paComplete)
+            pos[0] = i + frame_count
+            return (chunk.tobytes(), pyaudio.paContinue)
+
+        stream = self.pa.open(
+            format=pyaudio.paFloat32, channels=1, rate=self.RATE, output=True,
+            frames_per_buffer=2048, stream_callback=callback,
+        )
+        stream.start_stream()
+        while stream.is_active() and not stop.is_set():
+            time.sleep(0.05)
+        stream.stop_stream()
+        stream.close()
+
     def get_state(self):
         with self._lock:
             return self._vol, self._note
@@ -196,7 +242,13 @@ class App:
     def __init__(self, root):
         self.root   = root
         self.root.title("Music Lessons")
-        self.root.geometry("920x740")
+        win_w, win_h = 920, 740
+        root.update_idletasks()
+        sx = root.winfo_screenwidth()
+        sy = root.winfo_screenheight()
+        x  = max(0, (sx - win_w) // 2)
+        y  = max(0, (sy - win_h) // 2)
+        self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
         self.cfg    = load_config()
         self.audio  = AudioEngine()
         self._input_devices = self.audio.get_input_devices()

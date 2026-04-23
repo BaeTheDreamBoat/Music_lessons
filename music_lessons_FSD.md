@@ -1,6 +1,6 @@
 # Functional Specification Document
 
-## Music Lessons — Version 2.3
+## Music Lessons — Version 3.0
 
 ------
 
@@ -8,7 +8,7 @@
 
 - **Language:** Python 3
 - **GUI framework:** Tkinter with ttk widgets
-- **Audio:** PyAudio (44100 Hz, mono, float32) with autocorrelation-based pitch detection
+- **Audio:** PyAudio (44100 Hz, mono, float32) for both microphone input (autocorrelation pitch detection) and synthesized tone output (callback-based sine wave)
 - **Image handling:** Pillow (PIL)
 - **Config persistence:** JSON file (`config.json`) stored alongside the script
 - **Images** are placed in `./images/` relative to the script:
@@ -26,10 +26,14 @@ All settings are stored in `config.json` and loaded at startup. Missing keys fal
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `lower_note` | `C4` | Lower bound of note range |
-| `upper_note` | `B5` | Upper bound of note range |
+| `lower_note` | `C4` | Lower bound of the general note range |
+| `upper_note` | `B5` | Upper bound of the general note range |
+| `sound_lower_note` | `C4` | Lower bound of the sound-mode note range |
+| `sound_upper_note` | `B4` | Upper bound of the sound-mode note range |
 | `num_notes` | `10` | Number of notes per lesson |
-| `note_duration` | `2.0` | Seconds the correct note must be held |
+| `note_duration` | `2.0` | Seconds the correct note must be held (mic modes) |
+| `tone_duration` | `1.5` | Seconds the synthesized tone plays |
+| `tone_volume` | `0.5` | Amplitude of synthesized tone (0.05–1.0) |
 | `mic_threshold` | `0.02` | Minimum RMS volume to register a note |
 | `mic_device_index` | `null` | PyAudio input device index (null = system default) |
 | `note_scale` | `1.0` | Size multiplier for note/sharp/flat/line images |
@@ -41,10 +45,9 @@ All settings are stored in `config.json` and loaded at startup. Missing keys fal
 | `flat_y_offset` | `0` | Y offset of flat symbol from note centre, in debug pixels |
 | `ledger_above_y_offset` | `0` | Y offset of ledger line relative to note centre when above the staff, in debug pixels |
 | `ledger_below_y_offset` | `0` | Y offset of ledger line relative to note centre when below the staff, in debug pixels |
-| `note_stats_Play By Staff Location` | `{}` | Per-note adaptive stats for Play By Staff Location mode (keyed by note name string) |
-| `note_stats_Play By Note Name` | `{}` | Per-note adaptive stats for Play By Note Name mode (keyed by note name string) |
+| `note_stats_<mode>` | `{}` | Per-note adaptive stats for each mode, keyed by note name string |
 
-Config is saved immediately whenever any setting changes (range selectors, mic threshold, mic device, note scale, debug save, note stats update).
+Config is saved immediately whenever any setting changes.
 
 ------
 
@@ -74,21 +77,40 @@ All images (note, sharp, flat, line) are scaled by `sf` from their debug-referen
 
 ## Main Menu
 
-The window opens at 920×740. The main menu is a grid layout with the following controls:
+### Window behaviour
+- The window opens centred on the screen at 920×740.
+- After the menu is built, `minsize` is set to the menu's required dimensions so the window cannot be dragged smaller than the content.
+- If the window is already smaller than the required size (e.g. returning from a lesson at a reduced size), it is resized to fit automatically.
+- The menu frame uses `rowconfigure(weight=1)` on every row so available vertical space is distributed evenly between all rows — elements spread out in a large window and compress toward minimum height in a small one, without scrolling.
 
 ### Note Range
 - **Lower** and **Upper** combo boxes, read-only, listing every note from C0–B8 in scientific pitch notation; chromatic notes are displayed with both spellings (e.g. `C#4/Db4`), natural notes as plain names (e.g. `C4`)
-- The underlying config stores the sharp spelling (e.g. `C#4`); the display form is converted on load and save
+- Used by: **Play By Staff Location**, **Play By Note Name**
 - Selection is saved to config immediately on change
-- Both bounds are inclusive; the lesson draws from both sharp and flat spellings of every chromatic note in the range
+
+### Sound Range
+- Separate **Lower** and **Upper** combo boxes with the same display format as Note Range
+- Used exclusively by: **Identify Note By Sound**, **Play By Sound**
+- Default range C4–B4 (one octave); intended to be narrower than the general range to suit the higher difficulty of these modes
+- Selection is saved to config immediately on change
 
 ### Number of Notes
 - Spinbox, range 1–200, default 10
 - Saved when the lesson starts
 
-### Duration (s)
+### Hold Duration (s)
 - Spinbox, range 0.5–10.0, step 0.5, default 2.0 seconds
-- The note must be held continuously above the mic threshold for this duration to count as correct
+- The note must be held continuously above the mic threshold for this duration to count as correct (mic-based modes only)
+- Saved when the lesson starts
+
+### Tone Duration (s)
+- Spinbox, range 0.5–10.0, step 0.5, default 1.5 seconds
+- Duration of the synthesized tone played in sound-based modes
+- Saved when the lesson starts
+
+### Tone Volume
+- Spinbox, range 0.05–1.0, step 0.05, default 0.5
+- Amplitude of the synthesized sine-wave tone
 - Saved when the lesson starts
 
 ### Mic Device
@@ -106,9 +128,20 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 - Applies a uniform size multiplier to all images except the staff; saved to config and images are reloaded immediately
 
 ### Mode Selection
-- Radio buttons: **Play By Staff Location** / **Play By Note Name**
-- **Start** button (green) launches the selected mode
-- Each mode maintains independent note stats; switching modes does not affect the other mode's history
+Radio buttons are arranged in two rows:
+
+**Row 1 — Play modes** (use the general Note Range, mic input):
+- Play By Staff Location
+- Play By Note Name
+- Play By Sound
+
+**Row 2 — Identify modes** (use the Sound Range, button input):
+- Identify Note By Staff Location
+- Identify Note By Sound
+
+**Start** button (green) launches the selected mode.
+
+Each mode maintains independent note stats; switching modes does not affect other modes' history.
 
 ### Debug Selection
 - Radio buttons: **Note on scale** / **sharp location** / **flat location** / **notes above scale** / **notes below scale**
@@ -141,7 +174,7 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 - When `RMS > mic_threshold` **and** the detected pitch matches the target note (enharmonic equivalence via MIDI number), a hold timer starts
 - When the note has been held for `note_duration` seconds continuously, the background flashes lime green (#32cd32) for 400 ms, then the next note is shown
 - If the note is released or changes, the hold timer resets
-- On a correct note, elapsed time (from when the note was displayed to when the hold completed) is recorded and the note's adaptive stats are updated (see Adaptive Note Selection)
+- On a correct note, elapsed time is recorded and the note's adaptive stats are updated
 - Progress bar value advances by 1 per correct note
 - After all notes are completed, a "Lesson Complete!" screen is shown with a "← Menu" button
 
@@ -149,13 +182,71 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 
 ## Play By Note Name Mode
 
-Identical flow to Play By Staff Location mode but displays the note name as large bold text (font size 80) instead of a staff image. Play By Note Name mode has its own independent note stats (`note_stats_Play By Note Name`).
+Identical flow to Play By Staff Location but displays the note name as large bold text (font size 80) instead of a staff image. Has its own independent note stats.
+
+------
+
+## Play By Sound Mode
+
+### Layout
+- Progress bar across the top
+- Large `?` label (font size 80, grey) filling the centre — nothing is shown that reveals the note identity
+- **Replay** button to replay the current tone
+- "← Menu" button at the bottom
+
+### Flow
+1. When a note is shown, the synthesized tone is played immediately via `AudioEngine.play_tone`
+2. Listening for the correct pitch begins immediately alongside playback (the user may play along or after the tone ends)
+3. Detection and progression are identical to Play By Staff Location (mic threshold, hold duration, flash, stats update)
+4. **Replay** replays the tone at any time; it interrupts any currently playing tone
+5. Uses the **Sound Range** note pool
+
+------
+
+## Identify Note By Staff Location Mode
+
+### Layout
+- Progress bar across the top
+- Staff canvas (same rendering as Play By Staff Location, responsive)
+- Two rows of answer buttons:
+  - **Top row:** note name buttons — one per chromatic pitch present in the active pool, labelled with enharmonic pairs where applicable (e.g. `C#/Db`), ordered C → B
+  - **Bottom row:** octave buttons — one per octave present in the active pool, labelled `0`–`9`
+- "← Menu" button at the bottom
+
+### Button filtering
+Only note names and octave numbers actually present in the active pool are shown. For example, a pool of C5–D5 produces three name buttons (`C`, `C#/Db`, `D`) and one octave button (`5`). Fewer buttons means each button is wider.
+
+### Interaction
+- No audio listening; progression is entirely button-driven
+- Clicking a **wrong** button turns it red; the button remains red and other buttons may still be clicked
+- Clicking the **correct** button turns it green
+- Once both the correct name button and the correct octave button are green, all buttons are disabled and the correct-note flash/advance sequence fires (identical to mic modes)
+- Stats are tracked identically to mic modes
+
+------
+
+## Identify Note By Sound Mode
+
+### Layout
+- Progress bar across the top
+- Large `?` label (font size 80, grey)
+- Control row: **Replay** button and **Reference: C4** button side by side
+- Two rows of answer buttons (same filtering logic as Identify Note By Staff Location)
+- "← Menu" button at the bottom
+
+### Flow
+1. When a note is shown, the synthesized tone plays immediately
+2. The user clicks the matching note name and octave buttons
+3. Button interaction is identical to Identify Note By Staff Location (wrong = red, correct = green, both correct = advance)
+4. **Replay** replays the current question tone, interrupting any in-progress playback
+5. **Reference: C4** always plays a C4 tone at the current tone volume and duration, giving the user a pitch anchor; this button is never disabled
+6. Uses the **Sound Range** note pool
 
 ------
 
 ## Adaptive Note Selection
 
-Each mode tracks per-note statistics that bias which notes appear in future lessons. Stats are stored in `config.json` under `note_stats_Play By Staff Location` and `note_stats_Play By Note Name`, keyed by note name string. Each entry has four fields:
+Each mode tracks per-note statistics that bias which notes appear in future lessons. Stats are stored in `config.json` under `note_stats_<mode name>`, keyed by note name string. Each entry has four fields:
 
 | Field | Initial value | Description |
 |-------|---------------|-------------|
@@ -165,100 +256,93 @@ Each mode tracks per-note statistics that bias which notes appear in future less
 | `loss_streak` | `0` | Consecutive notes played slower than average (max 3) |
 
 ### Expanded pool
-Before building the sequence, the chromatic note pool is expanded so every chromatic pitch appears as **two entries** — its sharp spelling and its flat spelling (e.g. `C#4` and `Db4`). Natural notes appear once. Each entry has its own independent stats, so `C#4` and `Db4` can accumulate different average times even though they produce the same pitch.
+Before building the sequence, the chromatic note pool is expanded so every chromatic pitch appears as **two entries** — its sharp spelling and its flat spelling (e.g. `C#4` and `Db4`). Natural notes appear once. Each entry has its own independent stats.
 
 ### Note weighting
 Each entry in the expanded pool is assigned a weight equal to its `avg_time` (default 5.0 for unseen entries). Notes are drawn via weighted random selection, so entries with a higher average time appear proportionally more often.
 
 ### 2-note cooldown
-The same pitch (by MIDI number) cannot appear — in either spelling — until at least 2 other pitches have been played. The sequence is built iteratively: before each pick, the last 2 MIDI numbers chosen are excluded from the available pool. If the pool has 2 or fewer distinct pitches the cooldown is silently bypassed.
+The same pitch (by MIDI number) cannot appear — in either spelling — until at least 2 other pitches have been played.
 
 ### Stats update (on each correct note)
-Stats are keyed by the **display name** of the note (e.g. `"C#4"` or `"Db4"`), not by MIDI number, so enharmonic spellings are tracked independently.
-
-Let `elapsed` = wall-clock seconds from note display to successful hold completion.
+Let `elapsed` = wall-clock seconds from note display to correct answer.
 
 1. **Cap:** `capped = min(elapsed, 5.0)`
 2. **Classify:**
-   - If `capped > avg_time` (slower than average — loss):
-     - Reset `win_streak` to 0; increment `loss_streak` (max 3)
-     - `streak_mult = loss_streak / 3`
-     - `adjusted = avg_time + (capped − avg_time) × streak_mult`
-   - If `capped ≤ avg_time` (faster than average — win):
-     - Reset `loss_streak` to 0; increment `win_streak` (max 3)
-     - `streak_mult = win_streak / 3`
-     - `adjusted = avg_time − (avg_time − capped) × streak_mult`
+   - If `capped > avg_time` (slower — loss): reset `win_streak` to 0; increment `loss_streak` (max 3); `adjusted = avg_time + (capped − avg_time) × (loss_streak / 3)`
+   - If `capped ≤ avg_time` (faster — win): reset `loss_streak` to 0; increment `win_streak` (max 3); `adjusted = avg_time − (avg_time − capped) × (win_streak / 3)`
 3. **Running average:** `avg_time = (avg_time × count + adjusted) / (count + 1)`; `count += 1`
 4. Config is saved immediately after each update.
-
-The streak multiplier scales the push toward or away from the average: a streak of 1/3 produces a gentle nudge, 3/3 produces the full difference. The cap of 5.0 s prevents a single very slow attempt from inflating the average unboundedly.
-
-------
-
-## Debug Screens
-
-All debug screens use a fixed 800×440 canvas with the staff drawn at the debug reference scale (staff centred at y = 220). This ensures calibrated values transfer directly to the game, which uses the same coordinate origin.
-
-Each screen has a **Save & Back** button that writes the new values to `config.json` and returns to the main menu.
-
-### Note on Scale
-- **Purpose:** Calibrate `a4_y` (vertical position of A4) and `step_height` (pixels per diatonic step)
-- Two note heads are drawn side by side: A4 on the left, C5 on the right
-- **A4 ▲/▼ buttons:** Move both notes together (adjusts `a4_y`); use this to align the left note with the A4 line on the staff
-- **C5 offset ▲/▼ buttons:** Move only the C5 note (adjusts the two-step pixel distance); use this to align the right note with the C5 space on the staff
-- The status line shows `a4_y`, the current C5 offset, and the derived `step_height` (= C5 offset ÷ 2)
-- On save: `a4_y` = current A4 position; `step_height` = C5 offset ÷ 2
-
-### Sharp Location
-- **Purpose:** Calibrate `sharp_x_offset` and `sharp_y_offset`
-- Draws a note at A4 and the sharp symbol; arrow buttons (◄ ▲ ▼ ►) move the sharp symbol 1 px at a time
-- Status line shows current offsets
-- On save: writes `sharp_x_offset` and `sharp_y_offset`
-
-### Flat Location
-- **Purpose:** Calibrate `flat_x_offset` and `flat_y_offset`
-- Same layout as Sharp Location but for the flat symbol
-- On save: writes `flat_x_offset` and `flat_y_offset`
-
-### Notes Above Scale
-- **Purpose:** Calibrate `ledger_above_y_offset`
-- Blank canvas (no staff); note and ledger line are centred
-- ▲/▼ buttons move the ledger line relative to the note
-- On save: writes `ledger_above_y_offset`
-
-### Notes Below Scale
-- **Purpose:** Calibrate `ledger_below_y_offset`
-- Same layout as Notes Above Scale
-- On save: writes `ledger_below_y_offset`
-
-------
-
-## Note Range Limits
-
-The absolute playable range is **B3** (lowest) to **C7** (highest). The game's auto-scaling guarantees both extremes are always visible within the canvas regardless of window height. The user-configurable lower/upper bounds may be any notes within this range (or beyond — the scaling will still ensure visibility).
 
 ------
 
 ## Audio Engine
 
-- PyAudio stream: float32, mono, 44100 Hz, 4096-sample chunks, non-blocking callback
+### Microphone input
+- PyAudio input stream: float32, mono, 44100 Hz, 4096-sample chunks, non-blocking callback
 - **Volume:** RMS of each chunk
 - **Pitch detection:** Autocorrelation on the mean-centred chunk; finds the first local minimum then the subsequent peak lag; frequency = 44100 ÷ peak_lag; valid range 60–4200 Hz
 - Note is identified only when RMS > 0.005 (hard floor, separate from the user-adjustable threshold)
-- Enharmonic matching: both spellings of a chromatic note are accepted (C#4 and Db4 both match MIDI 61)
+
+### Tone synthesis (`play_tone`)
+- Generates a full-duration sine wave buffer in NumPy before playback begins (no streaming artifacts)
+- A 20 ms linear fade-in and fade-out envelope is applied to eliminate clicks
+- Playback uses a **callback-based PyAudio output stream** (`frames_per_buffer=2048`); the callback runs on PyAudio's internal audio thread, bypassing Python's GIL for glitch-free delivery
+- Non-blocking: launched on a daemon thread; the main thread is never stalled
+- **Interruptible:** each call to `play_tone` sets a stop event on the previous playback before starting a new one; the callback checks the event each frame and signals `paAbort` immediately when set — used by the Replay button to cut off the current tone
+- Signature: `play_tone(note: str, duration: float, volume: float)`
+
+------
+
+## Debug Screens
+
+All debug screens use a fixed 800×440 canvas with the staff drawn at the debug reference scale (staff centred at y = 220).
+
+Each screen has a **Save & Back** button that writes the new values to `config.json` and returns to the main menu.
+
+### Note on Scale
+- **Purpose:** Calibrate `a4_y` and `step_height`
+- Two note heads drawn side by side: A4 on the left, C5 on the right
+- **A4 ▲/▼:** Move both notes together (adjusts `a4_y`)
+- **C5 offset ▲/▼:** Move only the C5 note (adjusts `step_height` = C5 offset ÷ 2)
+
+### Sharp Location
+- **Purpose:** Calibrate `sharp_x_offset` and `sharp_y_offset`
+- Arrow buttons move the sharp symbol 1 px at a time relative to A4
+
+### Flat Location
+- **Purpose:** Calibrate `flat_x_offset` and `flat_y_offset`
+- Same layout as Sharp Location
+
+### Notes Above Scale
+- **Purpose:** Calibrate `ledger_above_y_offset`
+- ▲/▼ buttons move the ledger line relative to the note
+
+### Notes Below Scale
+- **Purpose:** Calibrate `ledger_below_y_offset`
+- Same layout as Notes Above Scale
+
+------
+
+## Note Range Limits
+
+The absolute playable range is **B3** (lowest) to **C7** (highest). The game's auto-scaling guarantees both extremes are always visible. The user-configurable bounds may be any notes within or beyond this range.
 
 ------
 
 ## File Layout
 
 ```
-music_lessons.py            — entry point; constants, utilities, AudioEngine, App coordinator
-menu.py                     — MainMenu GUI and lesson-launch logic
-play_by_staff_location.py   — StaffLesson: staff rendering and note detection loop
-play_by_note_name.py        — LettersLesson: large-text note display and detection loop
-progress_report.py          — BasLesson (shared audio loop), build_sequence, update_note_stats
-debug_menus.py              — DebugMenus: all five calibration screens
-config.json                 — persistent settings (auto-created)
+music_lessons.py                — entry point; constants, utilities, AudioEngine, App coordinator
+menu.py                         — MainMenu GUI and lesson-launch logic
+play_by_staff_location.py       — StaffLesson: staff rendering and mic detection loop
+play_by_note_name.py            — LettersLesson: large-text note display and mic detection loop
+play_by_sound.py                — SoundLesson: tone playback and mic detection loop
+identify_by_staff_location.py   — IdentifyStaffLesson: staff rendering and button identification
+identify_by_sound.py            — IdentifySoundLesson: tone playback and button identification
+progress_report.py              — BasLesson (shared audio loop), build_sequence, update_note_stats
+debug_menus.py                  — DebugMenus: all five calibration screens
+config.json                     — persistent settings (auto-created)
 images/
     staff.png
     note.png
@@ -272,15 +356,18 @@ images/
 | Module | Key exports |
 |---|---|
 | `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config`, `AudioEngine`, `App` |
-| `menu.py` | `MainMenu` — builds the main menu, mic bar, and range/mode selectors; delegates lesson and debug launch |
+| `menu.py` | `MainMenu` — builds the main menu; mic bar; range/mode selectors; delegates lesson and debug launch |
 | `play_by_staff_location.py` | `StaffLesson(BasLesson)` — scales and renders the treble clef staff, note head, ledger lines, and accidentals |
 | `play_by_note_name.py` | `LettersLesson(BasLesson)` — displays the note name as large bold text |
-| `progress_report.py` | `BasLesson` — shared audio-polling loop (`_listen`, `_poll`, `_hit`, `_advance`, `_complete`); `build_sequence` — weighted adaptive sequence builder; `update_note_stats` — per-note streak/average updater |
-| `debug_menus.py` | `DebugMenus` — five debug/calibration screens (note on scale, sharp, flat, ledger above/below) |
+| `play_by_sound.py` | `SoundLesson(BasLesson)` — plays a synthesized tone and listens for the matching pitch |
+| `identify_by_staff_location.py` | `IdentifyStaffLesson(BasLesson)` — renders staff; presents filtered note-name and octave buttons |
+| `identify_by_sound.py` | `IdentifySoundLesson(BasLesson)` — plays a synthesized tone; presents filtered buttons; Reference C4 button |
+| `progress_report.py` | `BasLesson` — shared audio-polling loop (`_listen`, `_poll`, `_hit`, `_advance`, `_complete`); `build_sequence`; `update_note_stats` |
+| `debug_menus.py` | `DebugMenus` — five debug/calibration screens |
 
 ### Import strategy
 
-`music_lessons.py` uses **lazy imports** (inside methods) when loading sub-modules, so each sub-module can safely do top-level `from music_lessons import …` without circular-import issues. Sub-modules never import from each other except `play_by_staff_location` and `play_by_note_name`, which both inherit from `progress_report.BasLesson`.
+`music_lessons.py` uses **lazy imports** (inside methods) when loading sub-modules, so each sub-module can safely do top-level `from music_lessons import …` without circular-import issues. Sub-modules never import from each other.
 
 ------
 
