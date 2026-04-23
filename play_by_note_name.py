@@ -1,4 +1,4 @@
-"""Letters mode: displays the note name as large text and listens for the correct pitch."""
+"""Play By Note Name mode: displays the note name as large text and listens for the correct pitch."""
 
 import time
 import tkinter as tk

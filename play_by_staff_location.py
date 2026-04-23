@@ -1,4 +1,4 @@
-"""Staff mode: renders notes on a treble clef and listens for the correct pitch."""
+"""Play By Staff Location mode: renders notes on a treble clef and listens for the correct pitch."""
 
 import time
 import tkinter as tk

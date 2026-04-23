@@ -1,6 +1,6 @@
 # Functional Specification Document
 
-## Music Lessons — Version 2.2
+## Music Lessons — Version 2.3
 
 ------
 
@@ -41,8 +41,8 @@ All settings are stored in `config.json` and loaded at startup. Missing keys fal
 | `flat_y_offset` | `0` | Y offset of flat symbol from note centre, in debug pixels |
 | `ledger_above_y_offset` | `0` | Y offset of ledger line relative to note centre when above the staff, in debug pixels |
 | `ledger_below_y_offset` | `0` | Y offset of ledger line relative to note centre when below the staff, in debug pixels |
-| `note_stats_Staff` | `{}` | Per-note adaptive stats for Staff mode (keyed by MIDI number string) |
-| `note_stats_Letters` | `{}` | Per-note adaptive stats for Letters mode (keyed by MIDI number string) |
+| `note_stats_Play By Staff Location` | `{}` | Per-note adaptive stats for Play By Staff Location mode (keyed by note name string) |
+| `note_stats_Play By Note Name` | `{}` | Per-note adaptive stats for Play By Note Name mode (keyed by note name string) |
 
 Config is saved immediately whenever any setting changes (range selectors, mic threshold, mic device, note scale, debug save, note stats update).
 
@@ -106,7 +106,7 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 - Applies a uniform size multiplier to all images except the staff; saved to config and images are reloaded immediately
 
 ### Mode Selection
-- Radio buttons: **Staff** / **Letters**
+- Radio buttons: **Play By Staff Location** / **Play By Note Name**
 - **Start** button (green) launches the selected mode
 - Each mode maintains independent note stats; switching modes does not affect the other mode's history
 
@@ -116,7 +116,7 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 
 ------
 
-## Staff Mode
+## Play By Staff Location Mode
 
 ### Layout
 - Progress bar across the top
@@ -147,15 +147,15 @@ The window opens at 920×740. The main menu is a grid layout with the following 
 
 ------
 
-## Letters Mode
+## Play By Note Name Mode
 
-Identical flow to Staff mode but displays the note name as large bold text (font size 80) instead of a staff image. Letters mode has its own independent note stats (`note_stats_Letters`).
+Identical flow to Play By Staff Location mode but displays the note name as large bold text (font size 80) instead of a staff image. Play By Note Name mode has its own independent note stats (`note_stats_Play By Note Name`).
 
 ------
 
 ## Adaptive Note Selection
 
-Each mode tracks per-note statistics that bias which notes appear in future lessons. Stats are stored in `config.json` under `note_stats_Staff` and `note_stats_Letters`, keyed by MIDI number string. Each entry has four fields:
+Each mode tracks per-note statistics that bias which notes appear in future lessons. Stats are stored in `config.json` under `note_stats_Play By Staff Location` and `note_stats_Play By Note Name`, keyed by note name string. Each entry has four fields:
 
 | Field | Initial value | Description |
 |-------|---------------|-------------|
@@ -252,13 +252,13 @@ The absolute playable range is **B3** (lowest) to **C7** (highest). The game's a
 ## File Layout
 
 ```
-music_lessons.py      — entry point; constants, utilities, AudioEngine, App coordinator
-menu.py               — MainMenu GUI and lesson-launch logic
-staff_lesson.py       — StaffLesson: staff rendering and note detection loop
-note_lesson.py        — LettersLesson: large-text note display and detection loop
-progress_report.py    — BasLesson (shared audio loop), build_sequence, update_note_stats
-debug_menus.py        — DebugMenus: all five calibration screens
-config.json           — persistent settings (auto-created)
+music_lessons.py            — entry point; constants, utilities, AudioEngine, App coordinator
+menu.py                     — MainMenu GUI and lesson-launch logic
+play_by_staff_location.py   — StaffLesson: staff rendering and note detection loop
+play_by_note_name.py        — LettersLesson: large-text note display and detection loop
+progress_report.py          — BasLesson (shared audio loop), build_sequence, update_note_stats
+debug_menus.py              — DebugMenus: all five calibration screens
+config.json                 — persistent settings (auto-created)
 images/
     staff.png
     note.png
@@ -273,14 +273,14 @@ images/
 |---|---|
 | `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config`, `AudioEngine`, `App` |
 | `menu.py` | `MainMenu` — builds the main menu, mic bar, and range/mode selectors; delegates lesson and debug launch |
-| `staff_lesson.py` | `StaffLesson(BasLesson)` — scales and renders the treble clef staff, note head, ledger lines, and accidentals |
-| `note_lesson.py` | `LettersLesson(BasLesson)` — displays the note name as large bold text |
+| `play_by_staff_location.py` | `StaffLesson(BasLesson)` — scales and renders the treble clef staff, note head, ledger lines, and accidentals |
+| `play_by_note_name.py` | `LettersLesson(BasLesson)` — displays the note name as large bold text |
 | `progress_report.py` | `BasLesson` — shared audio-polling loop (`_listen`, `_poll`, `_hit`, `_advance`, `_complete`); `build_sequence` — weighted adaptive sequence builder; `update_note_stats` — per-note streak/average updater |
 | `debug_menus.py` | `DebugMenus` — five debug/calibration screens (note on scale, sharp, flat, ledger above/below) |
 
 ### Import strategy
 
-`music_lessons.py` uses **lazy imports** (inside methods) when loading sub-modules, so each sub-module can safely do top-level `from music_lessons import …` without circular-import issues. Sub-modules never import from each other except `staff_lesson` and `note_lesson`, which both inherit from `progress_report.BasLesson`.
+`music_lessons.py` uses **lazy imports** (inside methods) when loading sub-modules, so each sub-module can safely do top-level `from music_lessons import …` without circular-import issues. Sub-modules never import from each other except `play_by_staff_location` and `play_by_note_name`, which both inherit from `progress_report.BasLesson`.
 
 ------
 

@@ -88,9 +88,9 @@ class MainMenu:
         ttk.Separator(f, orient='horizontal').grid(
             row=7, column=0, columnspan=6, sticky='ew', pady=6)
         tk.Label(f, text="Mode:", font=("Arial", 12, "bold")).grid(row=8, column=0, sticky='e')
-        self.mode_var = tk.StringVar(value="Staff")
-        tk.Radiobutton(f, text="Staff",   variable=self.mode_var, value="Staff"  ).grid(row=8, column=1, sticky='w')
-        tk.Radiobutton(f, text="Letters", variable=self.mode_var, value="Letters").grid(row=8, column=2, sticky='w')
+        self.mode_var = tk.StringVar(value="Play By Staff Location")
+        tk.Radiobutton(f, text="Play By Staff Location", variable=self.mode_var, value="Play By Staff Location").grid(row=8, column=1, sticky='w')
+        tk.Radiobutton(f, text="Play By Note Name",      variable=self.mode_var, value="Play By Note Name"     ).grid(row=8, column=2, sticky='w')
         tk.Button(f, text="Start", bg="#228b22", fg="white",
                   font=("Arial", 11, "bold"),
                   command=self._start_lesson).grid(row=8, column=5, padx=8)
@@ -157,11 +157,11 @@ class MainMenu:
         from progress_report import build_sequence
         mode = self.mode_var.get()
         seq  = build_sequence(self.app.cfg, mode, pool, self.app.cfg["num_notes"])
-        if mode == "Staff":
-            from staff_lesson import StaffLesson
+        if mode == "Play By Staff Location":
+            from play_by_staff_location import StaffLesson
             StaffLesson(self.app).show(seq, mode)
         else:
-            from note_lesson import LettersLesson
+            from play_by_note_name import LettersLesson
             LettersLesson(self.app).show(seq, mode)
 
     def _start_debug(self):
