@@ -9,7 +9,7 @@ from progress_report import BasLesson
 
 class LettersLesson(BasLesson):
 
-    def show(self, seq, mode):
+    def show(self, seq, mode, duration_s):
         self._seq  = seq
         self._mode = mode
         self._idx  = 0
@@ -19,14 +19,14 @@ class LettersLesson(BasLesson):
         self._bg = tk.Frame(app.root, bg="white")
         self._bg.pack(fill=tk.BOTH, expand=True)
 
-        self._prog = ttk.Progressbar(self._bg, maximum=len(seq))
+        self._prog = ttk.Progressbar(self._bg, maximum=duration_s)
         self._prog.pack(fill=tk.X, padx=20, pady=6)
 
         self._lbl = tk.Label(self._bg, text="", font=("Arial", 80, "bold"), bg="white")
         self._lbl.pack(expand=True)
 
         tk.Button(self._bg, text="\u2190 Menu", command=app.show_menu).pack(pady=4)
-        self._draw_next()
+        self._begin(duration_s)
 
     # ── BasLesson overrides ───────────────────────────────────────────────────
 
@@ -37,7 +37,6 @@ class LettersLesson(BasLesson):
         note = self._seq[self._idx]
         self._bg.config(bg="white")
         self._lbl.config(text=note, bg="white", fg="black")
-        self._prog['value'] = self._idx
         self._note_start_time = time.monotonic()
         self._listen(note)
 

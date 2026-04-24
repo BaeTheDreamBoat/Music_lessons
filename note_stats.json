@@ -1,0 +1,146 @@
+[
+  {
+    "date": "2026-04-22",
+    "time": "21:58:51",
+    "mode": "Identify Note By Sound",
+    "avg_notes_per_min": 17.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:05:30",
+    "mode": "Identify Note By Sound",
+    "avg_notes_per_min": 11.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:12:24",
+    "mode": "Identify Note By Sound",
+    "avg_notes_per_min": 15.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:14:58",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 6.0
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:33:01",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 8.0
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:34:23",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 18.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:35:33",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 13.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:36:44",
+    "mode": "Play By Note Name",
+    "avg_notes_per_min": 15.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:37:57",
+    "mode": "Play By Note Name",
+    "avg_notes_per_min": 8.0
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:40:04",
+    "mode": "Play By Note Name",
+    "avg_notes_per_min": 10.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:41:28",
+    "mode": "Play By Sound",
+    "avg_notes_per_min": 8.0
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:43:30",
+    "mode": "Play By Sound",
+    "avg_notes_per_min": 9.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:45:51",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 10.99
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:46:55",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 4.0
+  },
+  {
+    "date": "2026-04-22",
+    "time": "22:48:05",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 8.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:25:56",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 10.0
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:27:00",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 10.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:28:05",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 17.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:29:09",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 13.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:30:14",
+    "mode": "Play By Note Name",
+    "avg_notes_per_min": 11.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:36:00",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 11.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:37:29",
+    "mode": "Identify Note By Staff Location",
+    "avg_notes_per_min": 13.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:39:42",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 13.99
+  },
+  {
+    "date": "2026-04-23",
+    "time": "20:42:38",
+    "mode": "Play By Staff Location",
+    "avg_notes_per_min": 18.99
+  }
+]

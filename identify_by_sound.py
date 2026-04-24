@@ -27,8 +27,9 @@ def _buttons_for_pool(pool):
 
 
 class IdentifySoundLesson(BasLesson):
+    _note_hold_refund = False
 
-    def show(self, seq, mode, pool):
+    def show(self, seq, mode, pool, duration_s):
         self._seq   = seq
         self._mode  = mode
         self._idx   = 0
@@ -42,7 +43,7 @@ class IdentifySoundLesson(BasLesson):
         self._bg = tk.Frame(app.root, bg="white")
         self._bg.pack(fill=tk.BOTH, expand=True)
 
-        self._prog = ttk.Progressbar(self._bg, maximum=len(seq))
+        self._prog = ttk.Progressbar(self._bg, maximum=duration_s)
         self._prog.pack(fill=tk.X, padx=20, pady=6)
 
         self._lbl = tk.Label(self._bg, text="?", font=("Arial", 80), bg="white", fg="#aaaaaa")
@@ -85,7 +86,7 @@ class IdentifySoundLesson(BasLesson):
         self._default_btn_bg = next(iter(self._name_btn_map.values())).cget("bg")
 
         tk.Button(self._bg, text="← Menu", command=app.show_menu).pack(pady=4)
-        self._draw_next()
+        self._begin(duration_s)
 
     # ── BasLesson overrides ───────────────────────────────────────────────────
 
@@ -101,11 +102,11 @@ class IdentifySoundLesson(BasLesson):
         self._reset_buttons()
         note = self._seq[self._idx]
         self._target = note
-        self._prog['value'] = self._idx
         self._note_start_time = time.monotonic()
         self._bg.config(bg="white")
         self._lbl.config(text="?", bg="white", fg="#aaaaaa")
         self._replay_btn.config(state=tk.NORMAL)
+        self._pause_for_tone()
         self._play_tone()
 
     def _flash_widgets(self):

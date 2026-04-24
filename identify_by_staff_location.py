@@ -32,8 +32,9 @@ def _buttons_for_pool(pool):
 
 
 class IdentifyStaffLesson(BasLesson):
+    _note_hold_refund = False
 
-    def show(self, seq, mode, pool):
+    def show(self, seq, mode, pool, duration_s):
         self._seq   = seq
         self._mode  = mode
         self._idx   = 0
@@ -47,7 +48,7 @@ class IdentifyStaffLesson(BasLesson):
         self._bg = tk.Frame(app.root, bg="white")
         self._bg.pack(fill=tk.BOTH, expand=True)
 
-        self._prog = ttk.Progressbar(self._bg, maximum=len(seq))
+        self._prog = ttk.Progressbar(self._bg, maximum=duration_s)
         self._prog.pack(fill=tk.X, padx=20, pady=6)
 
         self._cv = tk.Canvas(self._bg, bg="white", width=CANVAS_W)
@@ -79,7 +80,7 @@ class IdentifyStaffLesson(BasLesson):
         self._default_btn_bg = next(iter(self._name_btn_map.values())).cget("bg")
 
         tk.Button(self._bg, text="← Menu", command=app.show_menu).pack(pady=4)
-        self._draw_next()
+        self._begin(duration_s)
 
     # ── BasLesson overrides ───────────────────────────────────────────────────
 
@@ -96,7 +97,6 @@ class IdentifyStaffLesson(BasLesson):
         note = self._seq[self._idx]
         self._target = note
         self._render(note)
-        self._prog['value'] = self._idx
         self._note_start_time = time.monotonic()
 
     def _flash_widgets(self):

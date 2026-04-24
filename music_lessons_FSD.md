@@ -1,6 +1,6 @@
 # Functional Specification Document
 
-## Music Lessons — Version 3.0
+## Music Lessons — Version 4
 
 ------
 
@@ -10,7 +10,9 @@
 - **GUI framework:** Tkinter with ttk widgets
 - **Audio:** PyAudio (44100 Hz, mono, float32) for both microphone input (autocorrelation pitch detection) and synthesized tone output (callback-based sine wave)
 - **Image handling:** Pillow (PIL)
+- **Graphing:** Matplotlib (FigureCanvasTkAgg embedded in Tkinter)
 - **Config persistence:** JSON file (`config.json`) stored alongside the script
+- **Lesson history persistence:** JSON file (`note_stats.json`) stored alongside the script
 - **Images** are placed in `./images/` relative to the script:
   - `staff.png` — treble clef staff
   - `note.png` — whole note head
@@ -30,10 +32,13 @@ All settings are stored in `config.json` and loaded at startup. Missing keys fal
 | `upper_note` | `B5` | Upper bound of the general note range |
 | `sound_lower_note` | `C4` | Lower bound of the sound-mode note range |
 | `sound_upper_note` | `B4` | Upper bound of the sound-mode note range |
-| `num_notes` | `10` | Number of notes per lesson |
+| `lesson_duration` | `5.0` | Lesson length in minutes |
 | `note_duration` | `2.0` | Seconds the correct note must be held (mic modes) |
 | `tone_duration` | `1.5` | Seconds the synthesized tone plays |
 | `tone_volume` | `0.5` | Amplitude of synthesized tone (0.05–1.0) |
+| `startup_delay` | `3` | Countdown seconds shown before each lesson begins (0 = no countdown) |
+| `playlist_selected` | `[]` | List of mode name strings checked in the Play List section |
+| `playlist_reps` | `1` | Times each selected playlist lesson repeats before advancing to the next |
 | `mic_threshold` | `0.02` | Minimum RMS volume to register a note |
 | `mic_device_index` | `null` | PyAudio input device index (null = system default) |
 | `note_scale` | `1.0` | Size multiplier for note/sharp/flat/line images |
@@ -94,12 +99,13 @@ All images (note, sharp, flat, line) are scaled by `sf` from their debug-referen
 - Default range C4–B4 (one octave); intended to be narrower than the general range to suit the higher difficulty of these modes
 - Selection is saved to config immediately on change
 
-### Number of Notes
-- Spinbox, range 1–200, default 10
+### Lesson Duration (min)
+- Spinbox, range 0.5–60.0, step 0.5, default 5.0 minutes
+- Controls how long each lesson runs; the lesson ends automatically when the time expires regardless of how many notes have been completed
 - Saved when the lesson starts
 
 ### Hold Duration (s)
-- Spinbox, range 0.5–10.0, step 0.5, default 2.0 seconds
+- Spinbox, range **0.25–10.0, step 0.25**, default 2.0 seconds
 - The note must be held continuously above the mic threshold for this duration to count as correct (mic-based modes only)
 - Saved when the lesson starts
 
@@ -111,6 +117,12 @@ All images (note, sharp, flat, line) are scaled by `sf` from their debug-referen
 ### Tone Volume
 - Spinbox, range 0.05–1.0, step 0.05, default 0.5
 - Amplitude of the synthesized sine-wave tone
+- Saved when the lesson starts
+
+### Start Delay (s)
+- Spinbox, range 0–10, step 1, default 3 seconds; integer
+- Number of seconds in the countdown shown before each lesson begins
+- Setting to 0 disables the countdown entirely
 - Saved when the lesson starts
 
 ### Mic Device
@@ -126,6 +138,7 @@ All images (note, sharp, flat, line) are scaled by `sf` from their debug-referen
 ### Note Scale
 - Spinbox (0.05–5.0, step 0.05) plus an **Apply** button
 - Applies a uniform size multiplier to all images except the staff; saved to config and images are reloaded immediately
+- The **Start Delay (s)** spinbox sits on the same row as Note Scale, to the right of the Apply button
 
 ### Mode Selection
 Radio buttons are arranged in two rows:
@@ -135,13 +148,39 @@ Radio buttons are arranged in two rows:
 - Play By Note Name
 - Play By Sound
 
-**Row 2 — Identify modes** (use the Sound Range, button input):
+**Row 2 — Identify modes:**
 - Identify Note By Staff Location
 - Identify Note By Sound
 
 **Start** button (green) launches the selected mode.
 
+The selected mode is remembered for the duration of the application session (`App._last_mode`); returning to the menu after a lesson restores the last-used selection. This state is not persisted across restarts.
+
 Each mode maintains independent note stats; switching modes does not affect other modes' history.
+
+### Play List
+A section below Mode Selection that lets the user queue multiple lessons to run back-to-back.
+
+**Fixed lesson order** (regardless of which lessons are selected):
+1. Identify Note By Staff Location
+2. Play By Staff Location
+3. Play By Note Name
+4. Play By Sound
+5. Identify Note By Sound
+
+**Controls:**
+- **Five checkboxes** — one per lesson in the fixed order, arranged in a 3+2 grid. Checked lessons are included in the playlist; unchecked lessons are skipped.
+- **Repetitions** spinbox (1–20, step 1, default 1) — how many times each selected lesson runs before advancing to the next. A value of 2 means each checked lesson plays twice consecutively before moving on.
+- **Start Playlist** button (dark blue) — builds the step list and launches the first lesson.
+
+**Persistence:** Both the checkbox states (`playlist_selected`) and the repetitions value (`playlist_reps`) are saved to `config.json` immediately whenever they change, and restored on the next application launch.
+
+**Playlist execution:**
+1. The step list is the ordered sequence of selected modes, each repeated `reps` times: e.g. two selected modes with reps=2 produces four steps.
+2. Each step launches the appropriate lesson class using the same note pool and duration as a manually started lesson.
+3. When a lesson finishes, the full **Completion Screen** is shown (see below). The button row contains both "← Menu" and a dark-blue **"Next: {next lesson name} →"** button (or **"Finish →"** on the last step).
+4. Clicking "← Menu" at any point (during a lesson or on the completion screen) exits the playlist and returns to the main menu.
+5. After all steps complete, the application returns to the main menu automatically.
 
 ### Debug Selection
 - Radio buttons: **Note on scale** / **sharp location** / **flat location** / **notes above scale** / **notes below scale**
@@ -149,10 +188,47 @@ Each mode maintains independent note stats; switching modes does not affect othe
 
 ------
 
+## Time-Based Lesson Flow
+
+All lesson modes share the same time-based progression system managed by `BasLesson`.
+
+### Sequence pre-generation
+At lesson start, a note sequence is generated with `max(200, lesson_duration_s × 2)` entries — enough buffer to ensure the sequence is never exhausted before the timer fires, even at the fastest possible play speed.
+
+### Pre-lesson countdown
+Before every lesson, `BasLesson._begin(duration_s)` is called instead of starting the lesson directly. If `startup_delay > 0`, a large countdown number is displayed as a full-screen overlay on the lesson background. The overlay counts down one second per tick and is destroyed when it reaches zero, at which point `_draw_next()` and `_start_lesson_timer()` are called. Setting `startup_delay` to 0 skips the overlay entirely.
+
+### Lesson timer
+- `_start_lesson_timer(duration_s)` records the start time (offset by any pending pause accumulated during the countdown phase) and begins a 500 ms repeating tick.
+- Each tick computes `elapsed = max(0.0, now − lesson_start_time)` and updates the progress bar value to `elapsed` (maximum = `lesson_duration_s`).
+- When `elapsed >= lesson_duration_s`, the lesson ends and the completion screen is shown.
+
+### Time refunds on correct answers
+When a note is answered correctly, `BasLesson._add_time(seconds)` is called, which extends `_lesson_duration_s` and updates `_prog['maximum']`. The progress bar's endpoint visibly extends, rewarding the player with extra time. Two sources of refund are applied on every correct answer:
+
+| Refund | Amount | Applies to |
+|--------|--------|-----------|
+| Green flash | 0.4 s | All lesson modes |
+| Note hold | `note_duration` s | Play By Staff Location, Play By Note Name, Play By Sound only |
+
+Identify modes (Identify Note By Staff Location, Identify Note By Sound) receive only the flash refund because button presses are instantaneous — no hold time was spent. This is controlled by the class attribute `_note_hold_refund` (`True` on `BasLesson`, overridden to `False` on both identify lesson classes).
+
+### Timer pause during auto-play tones
+In **Play By Sound** and **Identify Note By Sound**, when a new note's tone plays automatically at the start of each question, the lesson timer is paused for `tone_duration` seconds so that time spent listening does not count against the lesson. Pressing **Replay** does not pause the timer.
+
+Implementation: `BasLesson._pause_for_tone()` shifts `_lesson_start_time` forward by `tone_duration`. Because `elapsed` is clamped to `max(0.0, …)`, no negative values reach the progress bar. `_lesson_duration_s` and `_prog['maximum']` are not modified, so the lesson always ends at exactly the configured duration of active play time.
+
+For the first note, `_pause_for_tone()` is called before `_start_lesson_timer()` has run. The shift amount is stored in `_pending_pause` and applied when `_start_lesson_timer()` sets `_lesson_start_time`.
+
+### Early termination guard
+Every callback that could fire after lesson end (`_poll`, `_hit`, `_advance`) checks a `_lesson_ended` flag and returns immediately if set, preventing double-completion or UI corruption.
+
+------
+
 ## Play By Staff Location Mode
 
 ### Layout
-- Progress bar across the top
+- Time-based progress bar across the top (fills left-to-right as the lesson time elapses)
 - Canvas filling the remaining window height (responsive)
 - "← Menu" button at the bottom
 
@@ -174,9 +250,8 @@ Each mode maintains independent note stats; switching modes does not affect othe
 - When `RMS > mic_threshold` **and** the detected pitch matches the target note (enharmonic equivalence via MIDI number), a hold timer starts
 - When the note has been held for `note_duration` seconds continuously, the background flashes lime green (#32cd32) for 400 ms, then the next note is shown
 - If the note is released or changes, the hold timer resets
-- On a correct note, elapsed time is recorded and the note's adaptive stats are updated
-- Progress bar value advances by 1 per correct note
-- After all notes are completed, a "Lesson Complete!" screen is shown with a "← Menu" button
+- On a correct note, elapsed time is recorded, the note's adaptive stats are updated, `_notes_completed` is incremented, and time is refunded (flash + hold duration)
+- The lesson ends when the time limit expires; the completion screen is shown
 
 ------
 
@@ -189,16 +264,16 @@ Identical flow to Play By Staff Location but displays the note name as large bol
 ## Play By Sound Mode
 
 ### Layout
-- Progress bar across the top
+- Time-based progress bar across the top
 - Large `?` label (font size 80, grey) filling the centre — nothing is shown that reveals the note identity
 - **Replay** button to replay the current tone
 - "← Menu" button at the bottom
 
 ### Flow
-1. When a note is shown, the synthesized tone is played immediately via `AudioEngine.play_tone`
+1. When a new question begins, the lesson timer is paused for `tone_duration` seconds, then the synthesized tone plays via `AudioEngine.play_tone`
 2. Listening for the correct pitch begins immediately alongside playback (the user may play along or after the tone ends)
-3. Detection and progression are identical to Play By Staff Location (mic threshold, hold duration, flash, stats update)
-4. **Replay** replays the tone at any time; it interrupts any currently playing tone
+3. Detection and progression are identical to Play By Staff Location (mic threshold, hold duration, flash, stats update, time refunds)
+4. **Replay** replays the tone at any time; it interrupts any currently playing tone but does **not** pause the lesson timer
 5. Uses the **Sound Range** note pool
 
 ------
@@ -206,7 +281,7 @@ Identical flow to Play By Staff Location but displays the note name as large bol
 ## Identify Note By Staff Location Mode
 
 ### Layout
-- Progress bar across the top
+- Time-based progress bar across the top
 - Staff canvas (same rendering as Play By Staff Location, responsive)
 - Two rows of answer buttons:
   - **Top row:** note name buttons — one per chromatic pitch present in the active pool, labelled with enharmonic pairs where applicable (e.g. `C#/Db`), ordered C → B
@@ -221,6 +296,7 @@ Only note names and octave numbers actually present in the active pool are shown
 - Clicking a **wrong** button turns it red; the button remains red and other buttons may still be clicked
 - Clicking the **correct** button turns it green
 - Once both the correct name button and the correct octave button are green, all buttons are disabled and the correct-note flash/advance sequence fires (identical to mic modes)
+- On a correct answer, time is refunded (flash only; no hold duration)
 - Stats are tracked identically to mic modes
 
 ------
@@ -228,19 +304,74 @@ Only note names and octave numbers actually present in the active pool are shown
 ## Identify Note By Sound Mode
 
 ### Layout
-- Progress bar across the top
+- Time-based progress bar across the top
 - Large `?` label (font size 80, grey)
 - Control row: **Replay** button and **Reference: C4** button side by side
 - Two rows of answer buttons (same filtering logic as Identify Note By Staff Location)
 - "← Menu" button at the bottom
 
 ### Flow
-1. When a note is shown, the synthesized tone plays immediately
+1. When a new question begins, the lesson timer is paused for `tone_duration` seconds, then the synthesized tone plays
 2. The user clicks the matching note name and octave buttons
 3. Button interaction is identical to Identify Note By Staff Location (wrong = red, correct = green, both correct = advance)
-4. **Replay** replays the current question tone, interrupting any in-progress playback
-5. **Reference: C4** always plays a C4 tone at the current tone volume and duration, giving the user a pitch anchor; this button is never disabled
-6. Uses the **Sound Range** note pool
+4. On a correct answer, time is refunded (flash only; no hold duration)
+5. **Replay** replays the current question tone, interrupting any in-progress playback; does **not** pause the timer
+6. **Reference: C4** always plays a C4 tone at the current tone volume and duration, giving the user a pitch anchor; this button is never disabled
+7. Uses the **Sound Range** note pool
+
+------
+
+## Completion Screen
+
+Shown automatically when the lesson timer expires (or, as a safety net, if the pre-generated sequence is exhausted).
+
+### Summary stats
+- **"Lesson Complete!"** heading (font size 36, green)
+- **"Avg notes/min: X"** — the average notes completed per minute for this session, rounded to one decimal place
+
+### Historical performance graph
+A Matplotlib line graph (with filled area) embedded via `FigureCanvasTkAgg` showing past session performance for the current mode, drawn from `note_stats.json`. Four toggle buttons control the view:
+
+| Toggle | X-axis | Data shown |
+|--------|--------|------------|
+| **Current** | Session timestamp (date + HH:MM) | Last 10 individual sessions, unaveraged |
+| **Week** | Day of week (e.g. "Mon 21") | Daily average over the past 7 calendar days; all 7 days shown (zero if no data) |
+| **Month** | Week label (e.g. "Apr W2") | Weekly average over the past 4 weeks |
+| **Year** | Month label (e.g. "Jan 25") | Monthly average over the past 12 calendar months; all 12 months shown (zero if no data) |
+
+All views are filtered to the current lesson mode so each mode has its own independent history.
+
+### Navigation buttons
+The button row at the bottom of the completion screen contains:
+
+- **"← Menu"** — always present; returns to the main menu (and exits the playlist if one is running)
+- **"Next: {lesson name} →"** (dark blue) — present only when this lesson was launched as part of a playlist and there are more steps remaining; advances to the next playlist step
+- **"Finish →"** (dark blue) — present only when this lesson was the last step in a playlist; returns to the main menu
+
+------
+
+## Lesson Session Statistics
+
+Each completed lesson appends one record to `note_stats.json` (created on first use, stored alongside the script).
+
+### Record format
+```json
+{
+  "date": "2026-04-22",
+  "time": "14:30:00",
+  "mode": "Play By Staff Location",
+  "avg_notes_per_min": 12.5
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `date` | ISO date of the lesson (YYYY-MM-DD) |
+| `time` | Local time the lesson ended (HH:MM:SS) |
+| `mode` | Lesson mode name string (matches the radio button label) |
+| `avg_notes_per_min` | Notes correctly completed ÷ lesson duration in minutes, rounded to 2 decimal places |
+
+Records are append-only; existing entries are never modified or deleted. Playlist lessons each append their own record independently.
 
 ------
 
@@ -340,9 +471,11 @@ play_by_note_name.py            — LettersLesson: large-text note display and m
 play_by_sound.py                — SoundLesson: tone playback and mic detection loop
 identify_by_staff_location.py   — IdentifyStaffLesson: staff rendering and button identification
 identify_by_sound.py            — IdentifySoundLesson: tone playback and button identification
-progress_report.py              — BasLesson (shared audio loop), build_sequence, update_note_stats
+progress_report.py              — BasLesson (shared loop, timer, completion screen, stats graph),
+                                  build_sequence, update_note_stats
 debug_menus.py                  — DebugMenus: all five calibration screens
 config.json                     — persistent settings (auto-created)
+note_stats.json                 — lesson session history: date, time, mode, avg_notes_per_min (auto-created)
 images/
     staff.png
     note.png
@@ -355,15 +488,24 @@ images/
 
 | Module | Key exports |
 |---|---|
-| `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config`, `AudioEngine`, `App` |
-| `menu.py` | `MainMenu` — builds the main menu; mic bar; range/mode selectors; delegates lesson and debug launch |
+| `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `NOTE_STATS_FILE`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config` / `save_lesson_stats`, `AudioEngine`, `App` |
+| `menu.py` | `MainMenu` — builds the main menu; mic bar; range/mode/duration selectors; Play List section; delegates lesson, playlist, and debug launch |
 | `play_by_staff_location.py` | `StaffLesson(BasLesson)` — scales and renders the treble clef staff, note head, ledger lines, and accidentals |
 | `play_by_note_name.py` | `LettersLesson(BasLesson)` — displays the note name as large bold text |
-| `play_by_sound.py` | `SoundLesson(BasLesson)` — plays a synthesized tone and listens for the matching pitch |
-| `identify_by_staff_location.py` | `IdentifyStaffLesson(BasLesson)` — renders staff; presents filtered note-name and octave buttons |
-| `identify_by_sound.py` | `IdentifySoundLesson(BasLesson)` — plays a synthesized tone; presents filtered buttons; Reference C4 button |
-| `progress_report.py` | `BasLesson` — shared audio-polling loop (`_listen`, `_poll`, `_hit`, `_advance`, `_complete`); `build_sequence`; `update_note_stats` |
+| `play_by_sound.py` | `SoundLesson(BasLesson)` — pauses timer, plays a synthesized tone, and listens for the matching pitch |
+| `identify_by_staff_location.py` | `IdentifyStaffLesson(BasLesson)` — renders staff; presents filtered note-name and octave buttons; `_note_hold_refund = False` |
+| `identify_by_sound.py` | `IdentifySoundLesson(BasLesson)` — pauses timer, plays a synthesized tone; presents filtered buttons; Reference C4 button; `_note_hold_refund = False` |
+| `progress_report.py` | `BasLesson` — countdown (`_begin`, `_countdown_tick`), lesson timer (`_start_lesson_timer`, `_time_tick`, `_add_time`, `_pause_for_tone`), correct-note flow (`_hit`), completion screen with playlist-aware button row (`_complete`, `_draw_stats_graph`); `build_sequence`; `update_note_stats` |
 | `debug_menus.py` | `DebugMenus` — five debug/calibration screens |
+
+### Key `BasLesson` attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `_note_hold_refund` | class bool | `True` for play modes; `False` for identify modes — controls whether `note_duration` is refunded on correct answers |
+| `_playlist_callback` | callable or None | Set by the playlist runner before `show()`; called by `_complete()` to advance to the next step |
+| `_playlist_next_label` | str or None | Mode name of the next playlist step; used to label the Next button on the completion screen |
+| `_pending_pause` | float | Accumulated pause time to apply when the lesson timer starts (used when `_pause_for_tone` is called before `_start_lesson_timer`) |
 
 ### Import strategy
 
@@ -378,4 +520,5 @@ python >= 3.9
 pyaudio
 numpy
 Pillow
+matplotlib
 ```

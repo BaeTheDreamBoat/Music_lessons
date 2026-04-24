@@ -8,6 +8,14 @@ from music_lessons import (
     note_to_midi, midi_to_note, save_config,
 )
 
+PLAYLIST_ORDER = [
+    "Identify Note By Staff Location",
+    "Play By Staff Location",
+    "Play By Note Name",
+    "Play By Sound",
+    "Identify Note By Sound",
+]
+
 
 class MainMenu:
     def __init__(self, app):
@@ -20,7 +28,7 @@ class MainMenu:
 
         f = tk.Frame(app.root, padx=18, pady=10)
         f.pack(fill=tk.BOTH, expand=True)
-        for i in range(14):
+        for i in range(17):
             f.rowconfigure(i, weight=1)
 
         tk.Label(f, text="Music Lessons", font=("Arial", 22, "bold")).grid(
@@ -52,10 +60,11 @@ class MainMenu:
         self.slo_var.trace_add("write", lambda *_: self._save_sound_range())
         self.shi_var.trace_add("write", lambda *_: self._save_sound_range())
 
-        # ── Count & duration ──────────────────────────────────────────────────
-        tk.Label(f, text="# Notes:").grid(row=3, column=0, sticky='e', pady=6)
-        self.num_var = tk.IntVar(value=cfg["num_notes"])
-        tk.Spinbox(f, from_=1, to=200, textvariable=self.num_var, width=5).grid(row=3, column=2)
+        # ── Duration & volume ─────────────────────────────────────────────────
+        tk.Label(f, text="Lesson Duration (min):").grid(row=3, column=0, sticky='e', pady=6)
+        self.lesson_dur_var = tk.DoubleVar(value=cfg.get("lesson_duration", 5.0))
+        tk.Spinbox(f, from_=0.5, to=60.0, increment=0.5, format="%.1f",
+                   textvariable=self.lesson_dur_var, width=5).grid(row=3, column=2)
 
         tk.Label(f, text="Tone Volume:").grid(row=3, column=3, sticky='e', pady=6)
         self.tone_vol_var = tk.DoubleVar(value=cfg.get("tone_volume", 0.5))
@@ -64,7 +73,7 @@ class MainMenu:
 
         tk.Label(f, text="Hold Duration (s):").grid(row=4, column=0, sticky='e', pady=4)
         self.dur_var = tk.DoubleVar(value=cfg["note_duration"])
-        tk.Spinbox(f, from_=0.5, to=10.0, increment=0.5,
+        tk.Spinbox(f, from_=0.25, to=10.0, increment=0.25,
                    textvariable=self.dur_var, width=5).grid(row=4, column=2)
 
         tk.Label(f, text="Tone Duration (s):").grid(row=4, column=3, sticky='e', pady=4)
@@ -109,11 +118,16 @@ class MainMenu:
                    textvariable=self.ns_var, width=6).grid(row=7, column=2)
         tk.Button(f, text="Apply", command=self._apply_note_scale).grid(row=7, column=3, padx=4)
 
+        tk.Label(f, text="Start Delay (s):").grid(row=7, column=4, sticky='e', pady=4)
+        self.startup_delay_var = tk.IntVar(value=int(cfg.get("startup_delay", 3)))
+        tk.Spinbox(f, from_=0, to=10, increment=1,
+                   textvariable=self.startup_delay_var, width=4).grid(row=7, column=5, padx=4)
+
         # ── Mode selection ────────────────────────────────────────────────────
         ttk.Separator(f, orient='horizontal').grid(
             row=8, column=0, columnspan=6, sticky='ew', pady=6)
         tk.Label(f, text="Mode:", font=("Arial", 12, "bold")).grid(row=9, column=0, sticky='e')
-        self.mode_var = tk.StringVar(value="Play By Staff Location")
+        self.mode_var = tk.StringVar(value=getattr(app, '_last_mode', None) or "Play By Staff Location")
         tk.Radiobutton(f, text="Play By Staff Location", variable=self.mode_var, value="Play By Staff Location").grid(row=9, column=1, sticky='w')
         tk.Radiobutton(f, text="Play By Note Name",      variable=self.mode_var, value="Play By Note Name"     ).grid(row=9, column=2, sticky='w')
         tk.Radiobutton(f, text="Play By Sound",          variable=self.mode_var, value="Play By Sound"         ).grid(row=9, column=3, sticky='w')
@@ -123,19 +137,45 @@ class MainMenu:
                   font=("Arial", 11, "bold"),
                   command=self._start_lesson).grid(row=10, column=5, padx=8)
 
-        # ── Debug selection ───────────────────────────────────────────────────
+        # ── Play List ─────────────────────────────────────────────────────────
         ttk.Separator(f, orient='horizontal').grid(
             row=11, column=0, columnspan=6, sticky='ew', pady=6)
-        tk.Label(f, text="Debug:", font=("Arial", 12, "bold")).grid(row=12, column=0, sticky='e')
+        tk.Label(f, text="Play List:", font=("Arial", 12, "bold")).grid(
+            row=12, column=0, sticky='ne', pady=4)
+        checks_frame = tk.Frame(f)
+        checks_frame.grid(row=12, column=1, columnspan=5, sticky='w', pady=4)
+        self._playlist_checks = {}
+        saved_selected = cfg.get("playlist_selected", [])
+        for i, mode in enumerate(PLAYLIST_ORDER):
+            var = tk.BooleanVar(value=mode in saved_selected)
+            self._playlist_checks[mode] = var
+            var.trace_add("write", lambda *_: self._save_playlist_cfg())
+            r, c = divmod(i, 3)
+            tk.Checkbutton(checks_frame, text=mode, variable=var).grid(
+                row=r, column=c, sticky='w', padx=8, pady=1)
+        tk.Label(f, text="Repetitions:").grid(row=13, column=0, sticky='e', pady=4)
+        self.playlist_reps_var = tk.IntVar(value=int(cfg.get("playlist_reps", 1)))
+        self.playlist_reps_var.trace_add("write", lambda *_: self._save_playlist_cfg())
+        tk.Spinbox(f, from_=1, to=20, increment=1,
+                   textvariable=self.playlist_reps_var, width=4).grid(
+                   row=13, column=1, sticky='w')
+        tk.Button(f, text="Start Playlist", bg="#1a5276", fg="white",
+                  font=("Arial", 11, "bold"),
+                  command=self._start_playlist).grid(row=13, column=5, padx=8)
+
+        # ── Debug selection ───────────────────────────────────────────────────
+        ttk.Separator(f, orient='horizontal').grid(
+            row=14, column=0, columnspan=6, sticky='ew', pady=6)
+        tk.Label(f, text="Debug:", font=("Arial", 12, "bold")).grid(row=15, column=0, sticky='e')
         self.dbg_var = tk.StringVar(value="Note on scale")
         opts = ["Note on scale", "sharp location", "flat location",
                 "notes above scale", "notes below scale"]
         for i, opt in enumerate(opts):
             r, c = divmod(i, 3)
             tk.Radiobutton(f, text=opt, variable=self.dbg_var,
-                           value=opt).grid(row=12 + r, column=1 + c, sticky='w')
+                           value=opt).grid(row=15 + r, column=1 + c, sticky='w')
         tk.Button(f, text="Start Debug", bg="#cc6600", fg="white",
-                  command=self._start_debug).grid(row=13, column=5, padx=8)
+                  command=self._start_debug).grid(row=16, column=5, padx=8)
 
         # Enforce minimum window size so all elements always remain visible
         app.root.update_idletasks()
@@ -163,12 +203,22 @@ class MainMenu:
 
     def _save_lesson_cfg(self):
         cfg = self.app.cfg
-        cfg["num_notes"]      = self.num_var.get()
-        cfg["note_duration"]  = self.dur_var.get()
-        cfg["tone_duration"]  = self.tone_dur_var.get()
-        cfg["tone_volume"]    = self.tone_vol_var.get()
-        cfg["mic_threshold"]  = self.thr_var.get()
+        cfg["lesson_duration"] = self.lesson_dur_var.get()
+        cfg["note_duration"]   = self.dur_var.get()
+        cfg["tone_duration"]   = self.tone_dur_var.get()
+        cfg["tone_volume"]     = self.tone_vol_var.get()
+        cfg["startup_delay"]   = self.startup_delay_var.get()
+        cfg["mic_threshold"]   = self.thr_var.get()
         save_config(cfg)
+
+    def _save_playlist_cfg(self):
+        cfg = self.app.cfg
+        try:
+            cfg["playlist_selected"] = [m for m, v in self._playlist_checks.items() if v.get()]
+            cfg["playlist_reps"]     = self.playlist_reps_var.get()
+            save_config(cfg)
+        except Exception:
+            pass
 
     def _on_mic_change(self):
         name = self.mic_dev_var.get()
@@ -206,26 +256,86 @@ class MainMenu:
     def _start_lesson(self):
         self._save_lesson_cfg()
         mode = self.mode_var.get()
+        self.app._last_mode = mode
         pool = self._sound_note_range() if mode in self._SOUND_MODES else self._note_range()
         if not pool:
             return
+        duration_s = self.app.cfg["lesson_duration"] * 60
         from progress_report import build_sequence
-        seq  = build_sequence(self.app.cfg, mode, pool, self.app.cfg["num_notes"])
+        seq = build_sequence(self.app.cfg, mode, pool, duration_s)
         if mode == "Play By Staff Location":
             from play_by_staff_location import StaffLesson
-            StaffLesson(self.app).show(seq, mode)
+            StaffLesson(self.app).show(seq, mode, duration_s)
         elif mode == "Identify Note By Staff Location":
             from identify_by_staff_location import IdentifyStaffLesson
-            IdentifyStaffLesson(self.app).show(seq, mode, pool)
+            IdentifyStaffLesson(self.app).show(seq, mode, pool, duration_s)
         elif mode == "Identify Note By Sound":
             from identify_by_sound import IdentifySoundLesson
-            IdentifySoundLesson(self.app).show(seq, mode, pool)
+            IdentifySoundLesson(self.app).show(seq, mode, pool, duration_s)
         elif mode == "Play By Sound":
             from play_by_sound import SoundLesson
-            SoundLesson(self.app).show(seq, mode)
+            SoundLesson(self.app).show(seq, mode, duration_s)
         else:
             from play_by_note_name import LettersLesson
-            LettersLesson(self.app).show(seq, mode)
+            LettersLesson(self.app).show(seq, mode, duration_s)
+
+    def _start_playlist(self):
+        self._save_lesson_cfg()
+        reps = self.playlist_reps_var.get()
+        steps = []
+        for mode in PLAYLIST_ORDER:
+            if self._playlist_checks[mode].get():
+                for _ in range(reps):
+                    steps.append(mode)
+        if not steps:
+            return
+        self._run_playlist_step(steps, 0)
+
+    def _run_playlist_step(self, steps, index):
+        if index >= len(steps):
+            self.app.show_menu()
+            return
+        mode = steps[index]
+        self.app._last_mode = mode
+        pool = self._sound_note_range() if mode in self._SOUND_MODES else self._note_range()
+        if not pool:
+            self._run_playlist_step(steps, index + 1)
+            return
+        duration_s = self.app.cfg["lesson_duration"] * 60
+        from progress_report import build_sequence
+        seq = build_sequence(self.app.cfg, mode, pool, duration_s)
+        callback   = lambda: self._run_playlist_step(steps, index + 1)
+        next_label = steps[index + 1] if index + 1 < len(steps) else None
+        if mode == "Play By Staff Location":
+            from play_by_staff_location import StaffLesson
+            lesson = StaffLesson(self.app)
+            lesson._playlist_callback  = callback
+            lesson._playlist_next_label = next_label
+            lesson.show(seq, mode, duration_s)
+        elif mode == "Identify Note By Staff Location":
+            from identify_by_staff_location import IdentifyStaffLesson
+            lesson = IdentifyStaffLesson(self.app)
+            lesson._playlist_callback  = callback
+            lesson._playlist_next_label = next_label
+            lesson.show(seq, mode, pool, duration_s)
+        elif mode == "Identify Note By Sound":
+            from identify_by_sound import IdentifySoundLesson
+            lesson = IdentifySoundLesson(self.app)
+            lesson._playlist_callback  = callback
+            lesson._playlist_next_label = next_label
+            lesson.show(seq, mode, pool, duration_s)
+        elif mode == "Play By Sound":
+            from play_by_sound import SoundLesson
+            lesson = SoundLesson(self.app)
+            lesson._playlist_callback  = callback
+            lesson._playlist_next_label = next_label
+            lesson.show(seq, mode, duration_s)
+        else:
+            from play_by_note_name import LettersLesson
+            lesson = LettersLesson(self.app)
+            lesson._playlist_callback  = callback
+            lesson._playlist_next_label = next_label
+            lesson.show(seq, mode, duration_s)
 
     def _start_debug(self):
         from debug_menus import DebugMenus

@@ -12,8 +12,9 @@ from PIL import Image
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-IMAGES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+CONFIG_FILE     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+NOTE_STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "note_stats.json")
+IMAGES_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
 NOTE_NAMES    = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 DIATONIC      = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
@@ -40,10 +41,13 @@ DEFAULT_CONFIG = {
     "upper_note":            "B5",
     "sound_lower_note":      "C4",
     "sound_upper_note":      "B4",
-    "num_notes":             10,
+    "lesson_duration":       5.0,
     "note_duration":         2.0,
     "tone_duration":         1.5,
     "tone_volume":           0.5,
+    "startup_delay":         3,
+    "playlist_selected":     [],
+    "playlist_reps":         1,
     "mic_threshold":         0.02,
     "mic_device_index":      None,
     "note_scale":            1.0,
@@ -120,6 +124,24 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(cfg, f, indent=2)
+
+def save_lesson_stats(mode, duration_seconds, notes_completed):
+    from datetime import datetime
+    records = []
+    if os.path.exists(NOTE_STATS_FILE):
+        with open(NOTE_STATS_FILE) as f:
+            records = json.load(f)
+    now = datetime.now()
+    minutes = duration_seconds / 60.0
+    avg_per_min = round(notes_completed / minutes, 2) if minutes > 0 else 0.0
+    records.append({
+        "date":              now.strftime("%Y-%m-%d"),
+        "time":              now.strftime("%H:%M:%S"),
+        "mode":              mode,
+        "avg_notes_per_min": avg_per_min,
+    })
+    with open(NOTE_STATS_FILE, 'w') as f:
+        json.dump(records, f, indent=2)
 
 # ─── Audio engine ─────────────────────────────────────────────────────────────
 
@@ -249,7 +271,8 @@ class App:
         x  = max(0, (sx - win_w) // 2)
         y  = max(0, (sy - win_h) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        self.cfg    = load_config()
+        self.cfg        = load_config()
+        self._last_mode = None
         self.audio  = AudioEngine()
         self._input_devices = self.audio.get_input_devices()
         self.audio.start(self.cfg.get("mic_device_index"))
