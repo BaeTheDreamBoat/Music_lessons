@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y portaudio19-dev
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: |
+          pyinstaller --onefile --windowed \
+            --add-data "images:images" \
+            --name "music_lessons_linux" \
+            music_lessons.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music_lessons_linux
+          path: dist/music_lessons_linux
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: |
+          pyinstaller --onefile --windowed `
+            --add-data "images;images" `
+            --name "music_lessons" `
+            music_lessons.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music_lessons_windows
+          path: dist/music_lessons.exe
