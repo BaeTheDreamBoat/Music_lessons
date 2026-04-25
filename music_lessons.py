@@ -51,13 +51,13 @@ DEFAULT_CONFIG = {
     "mic_threshold":         0.02,
     "mic_device_index":      None,
     "note_scale":            1.0,
-    "a4_y":                  230,
-    "step_height":           14.0,
-    "sharp_x_offset":        -30,
-    "sharp_y_offset":        -5,
-    "flat_x_offset":         -28,
-    "flat_y_offset":          0,
-    "ledger_above_y_offset":  0,
+    "a4_y":                  238,
+    "step_height":           28.5,
+    "sharp_x_offset":        74,
+    "sharp_y_offset":        0,
+    "flat_x_offset":         58,
+    "flat_y_offset":         -28,
+    "ledger_above_y_offset": -2,
     "ledger_below_y_offset":  0,
 }
 
@@ -122,23 +122,21 @@ def load_config():
     return cfg
 
 def save_config(cfg):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(cfg, f, indent=2)
+    data = json.dumps(cfg, indent=2)
+    threading.Thread(target=lambda: open(CONFIG_FILE, 'w').write(data), daemon=True).start()
 
-def save_lesson_stats(mode, duration_seconds, notes_completed):
+def save_lesson_stats(mode, avg_per_min):
     from datetime import datetime
     records = []
     if os.path.exists(NOTE_STATS_FILE):
         with open(NOTE_STATS_FILE) as f:
             records = json.load(f)
     now = datetime.now()
-    minutes = duration_seconds / 60.0
-    avg_per_min = round(notes_completed / minutes, 2) if minutes > 0 else 0.0
     records.append({
         "date":              now.strftime("%Y-%m-%d"),
         "time":              now.strftime("%H:%M:%S"),
         "mode":              mode,
-        "avg_notes_per_min": avg_per_min,
+        "avg_notes_per_min": round(avg_per_min, 1),
     })
     with open(NOTE_STATS_FILE, 'w') as f:
         json.dump(records, f, indent=2)
@@ -152,6 +150,7 @@ class AudioEngine:
     def __init__(self):
         self.pa         = pyaudio.PyAudio()
         self.stream     = None
+        self._channels  = 1
         self._vol       = 0.0
         self._note      = None
         self._lock      = threading.Lock()
@@ -165,14 +164,46 @@ class AudioEngine:
                 devs.append((i, info['name']))
         return devs
 
-    def start(self, device_index=None):
-        self.stream = self.pa.open(
-            format=pyaudio.paFloat32, channels=1, rate=self.RATE,
+    def _open_stream(self, device_index, channels):
+        self._channels = channels
+        stream = self.pa.open(
+            format=pyaudio.paFloat32, channels=channels, rate=self.RATE,
             input=True, frames_per_buffer=self.CHUNK,
             stream_callback=self._cb,
             input_device_index=device_index,
         )
-        self.stream.start_stream()
+        stream.start_stream()
+        return stream
+
+    def start(self, device_index=None):
+        # Build candidate list: preferred device first, then all other input devices
+        candidates = []
+        if device_index is not None:
+            candidates.append(device_index)
+        try:
+            default_idx = self.pa.get_default_input_device_info()['index']
+            if default_idx not in candidates:
+                candidates.append(default_idx)
+        except OSError:
+            pass
+        for i in range(self.pa.get_device_count()):
+            info = self.pa.get_device_info_by_index(i)
+            if int(info['maxInputChannels']) > 0 and i not in candidates:
+                candidates.append(i)
+
+        last_err = None
+        for idx in candidates:
+            info = self.pa.get_device_info_by_index(idx)
+            max_ch = int(info['maxInputChannels'])
+            for ch in [1, 2] if max_ch == 0 else [min(max_ch, 1), min(max_ch, 2)]:
+                if ch < 1:
+                    continue
+                try:
+                    self.stream = self._open_stream(idx, ch)
+                    return
+                except (OSError, ValueError) as e:
+                    last_err = e
+        raise OSError(f"Could not open any input device: {last_err}")
 
     def restart(self, device_index=None):
         if self.stream:
@@ -182,7 +213,7 @@ class AudioEngine:
         self.start(device_index)
 
     def _cb(self, in_data, frame_count, time_info, status):
-        samples = np.frombuffer(in_data, dtype=np.float32).copy()
+        samples = np.frombuffer(in_data, dtype=np.float32).reshape(-1, self._channels).mean(axis=1)
         rms  = float(np.sqrt(np.mean(samples ** 2)))
         note = self._detect(samples) if rms > 0.005 else None
         with self._lock:
@@ -275,7 +306,10 @@ class App:
         self._last_mode = None
         self.audio  = AudioEngine()
         self._input_devices = self.audio.get_input_devices()
-        self.audio.start(self.cfg.get("mic_device_index"))
+        try:
+            self.audio.start(self.cfg.get("mic_device_index"))
+        except OSError as e:
+            print(f"Warning: could not open microphone: {e}\nUse Settings to select a device.")
         self._imgs       = {}
         self._refs       = []
         self._game_cache = (None, {})

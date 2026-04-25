@@ -72,16 +72,21 @@ class IdentifySoundLesson(BasLesson):
             btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
             self._name_btn_map[i] = btn
 
-        oct_frame = tk.Frame(self._bg, bg="white")
-        oct_frame.pack(fill=tk.X, padx=10, pady=(2, 4))
-        self._oct_btn_map: dict[int, tk.Button] = {}
-        for o in octaves:
-            btn = tk.Button(
-                oct_frame, text=str(o), font=("Arial", 10, "bold"),
-                command=lambda ov=o: self._on_oct(ov),
-            )
-            btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
-            self._oct_btn_map[o] = btn
+        if len(octaves) == 1:
+            self._auto_oct = octaves[0]
+            self._oct_btn_map: dict[int, tk.Button] = {}
+        else:
+            self._auto_oct = None
+            oct_frame = tk.Frame(self._bg, bg="white")
+            oct_frame.pack(fill=tk.X, padx=10, pady=(2, 4))
+            self._oct_btn_map: dict[int, tk.Button] = {}
+            for o in octaves:
+                btn = tk.Button(
+                    oct_frame, text=str(o), font=("Arial", 10, "bold"),
+                    command=lambda ov=o: self._on_oct(ov),
+                )
+                btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+                self._oct_btn_map[o] = btn
 
         self._default_btn_bg = next(iter(self._name_btn_map.values())).cget("bg")
 
@@ -98,7 +103,7 @@ class IdentifySoundLesson(BasLesson):
             self._complete()
             return
         self._selected_name = None
-        self._selected_oct  = None
+        self._selected_oct  = self._auto_oct
         self._reset_buttons()
         note = self._seq[self._idx]
         self._target = note

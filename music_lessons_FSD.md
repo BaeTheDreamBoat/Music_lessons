@@ -1,6 +1,6 @@
 # Functional Specification Document
 
-## Music Lessons — Version 4
+## Music Lessons — Version 4.1
 
 ------
 
@@ -42,17 +42,17 @@ All settings are stored in `config.json` and loaded at startup. Missing keys fal
 | `mic_threshold` | `0.02` | Minimum RMS volume to register a note |
 | `mic_device_index` | `null` | PyAudio input device index (null = system default) |
 | `note_scale` | `1.0` | Size multiplier for note/sharp/flat/line images |
-| `a4_y` | `230` | Absolute canvas Y coordinate of A4 in the debug reference canvas (800×440) |
-| `step_height` | `14.0` | Pixels per diatonic step at the debug reference scale |
-| `sharp_x_offset` | `-30` | X offset of sharp symbol from note centre, in debug pixels |
-| `sharp_y_offset` | `-5` | Y offset of sharp symbol from note centre, in debug pixels |
-| `flat_x_offset` | `-28` | X offset of flat symbol from note centre, in debug pixels |
-| `flat_y_offset` | `0` | Y offset of flat symbol from note centre, in debug pixels |
-| `ledger_above_y_offset` | `0` | Y offset of ledger line relative to note centre when above the staff, in debug pixels |
+| `a4_y` | `238` | Absolute canvas Y coordinate of A4 in the debug reference canvas (800×440) |
+| `step_height` | `28.5` | Pixels per diatonic step at the debug reference scale |
+| `sharp_x_offset` | `74` | X offset of sharp symbol from note centre, in debug pixels |
+| `sharp_y_offset` | `0` | Y offset of sharp symbol from note centre, in debug pixels |
+| `flat_x_offset` | `58` | X offset of flat symbol from note centre, in debug pixels |
+| `flat_y_offset` | `-28` | Y offset of flat symbol from note centre, in debug pixels |
+| `ledger_above_y_offset` | `-2` | Y offset of ledger line relative to note centre when above the staff, in debug pixels |
 | `ledger_below_y_offset` | `0` | Y offset of ledger line relative to note centre when below the staff, in debug pixels |
 | `note_stats_<mode>` | `{}` | Per-note adaptive stats for each mode, keyed by note name string |
 
-Config is saved immediately whenever any setting changes.
+Config is saved immediately whenever any setting changes. Serialization (`json.dumps`) runs on the main thread; the actual file write runs on a daemon background thread so the UI is never blocked by disk I/O.
 
 ------
 
@@ -291,11 +291,14 @@ Identical flow to Play By Staff Location but displays the note name as large bol
 ### Button filtering
 Only note names and octave numbers actually present in the active pool are shown. For example, a pool of C5–D5 produces three name buttons (`C`, `C#/Db`, `D`) and one octave button (`5`). Fewer buttons means each button is wider.
 
+### Single-octave optimisation
+When the active pool spans exactly one octave, the octave row is hidden entirely and the octave is auto-selected at the start of each note. A correct answer then requires only **one click** (the note name). When the pool spans multiple octaves the octave row is shown as normal.
+
 ### Interaction
 - No audio listening; progression is entirely button-driven
 - Clicking a **wrong** button turns it red; the button remains red and other buttons may still be clicked
 - Clicking the **correct** button turns it green
-- Once both the correct name button and the correct octave button are green, all buttons are disabled and the correct-note flash/advance sequence fires (identical to mic modes)
+- Once both the correct name and octave are confirmed (either by click or auto-selection), all buttons are disabled and the correct-note flash/advance sequence fires (identical to mic modes)
 - On a correct answer, time is refunded (flash only; no hold duration)
 - Stats are tracked identically to mic modes
 
@@ -313,7 +316,7 @@ Only note names and octave numbers actually present in the active pool are shown
 ### Flow
 1. When a new question begins, the lesson timer is paused for `tone_duration` seconds, then the synthesized tone plays
 2. The user clicks the matching note name and octave buttons
-3. Button interaction is identical to Identify Note By Staff Location (wrong = red, correct = green, both correct = advance)
+3. Button interaction is identical to Identify Note By Staff Location (wrong = red, correct = green, both correct = advance); the single-octave optimisation applies here too
 4. On a correct answer, time is refunded (flash only; no hold duration)
 5. **Replay** replays the current question tone, interrupting any in-progress playback; does **not** pause the timer
 6. **Reference: C4** always plays a C4 tone at the current tone volume and duration, giving the user a pitch anchor; this button is never disabled
@@ -369,7 +372,16 @@ Each completed lesson appends one record to `note_stats.json` (created on first 
 | `date` | ISO date of the lesson (YYYY-MM-DD) |
 | `time` | Local time the lesson ended (HH:MM:SS) |
 | `mode` | Lesson mode name string (matches the radio button label) |
-| `avg_notes_per_min` | Notes correctly completed ÷ lesson duration in minutes, rounded to 2 decimal places |
+| `avg_notes_per_min` | Average notes per minute for the session, rounded to 1 decimal place (see calculation below) |
+
+### Avg notes per minute calculation
+`avg_notes_per_min` is derived from the individual **response times** recorded for each correct answer during the lesson — not from the total lesson duration.
+
+**Response time per note** = wall-clock seconds from when the note was displayed to when the correct answer was registered, **minus** `tone_duration` for modes that auto-play a tone (Play By Sound, Identify Note By Sound). This isolates the player's reaction/thinking time, excluding time spent passively listening to the tone. Response time is floored at 0.1 s.
+
+**Session avg:** `avg_notes_per_min = 60 ÷ mean(response_times)`
+
+If no notes were completed the value is 0.0.
 
 Records are append-only; existing entries are never modified or deleted. Playlist lessons each append their own record independently.
 
@@ -396,22 +408,25 @@ Each entry in the expanded pool is assigned a weight equal to its `avg_time` (de
 The same pitch (by MIDI number) cannot appear — in either spelling — until at least 2 other pitches have been played.
 
 ### Stats update (on each correct note)
-Let `elapsed` = wall-clock seconds from note display to correct answer.
+Let `response_time` = wall-clock seconds from note display to correct answer, minus `tone_duration` for sound modes (same value used for `avg_notes_per_min`; floored at 0.1 s).
 
-1. **Cap:** `capped = min(elapsed, 5.0)`
+1. **Cap:** `capped = min(response_time, 5.0)`
 2. **Classify:**
    - If `capped > avg_time` (slower — loss): reset `win_streak` to 0; increment `loss_streak` (max 3); `adjusted = avg_time + (capped − avg_time) × (loss_streak / 3)`
    - If `capped ≤ avg_time` (faster — win): reset `loss_streak` to 0; increment `win_streak` (max 3); `adjusted = avg_time − (avg_time − capped) × (win_streak / 3)`
 3. **Running average:** `avg_time = (avg_time × count + adjusted) / (count + 1)`; `count += 1`
-4. Config is saved immediately after each update.
+4. Config is saved after each update (async file write; see Config section).
 
 ------
 
 ## Audio Engine
 
 ### Microphone input
-- PyAudio input stream: float32, mono, 44100 Hz, 4096-sample chunks, non-blocking callback
-- **Volume:** RMS of each chunk
+- PyAudio input stream: float32, 44100 Hz, 4096-sample chunks, non-blocking callback
+- **Channel count:** determined at stream-open time by querying the selected device's `maxInputChannels`; the stream opens with 1 channel if supported, otherwise 2. If the device's reported channel count is unusable, the engine falls back through all available input devices until one succeeds.
+- **Multi-channel mix-down:** if the stream opens with more than one channel, the callback averages all channels to produce a mono signal before pitch/volume processing.
+- **Graceful startup failure:** if no input device can be opened, the app logs a warning and continues without mic functionality instead of crashing. The user can select a working device via the Mic Device dropdown in the main menu.
+- **Volume:** RMS of each (mono) chunk
 - **Pitch detection:** Autocorrelation on the mean-centred chunk; finds the first local minimum then the subsequent peak lag; frequency = 44100 ÷ peak_lag; valid range 60–4200 Hz
 - Note is identified only when RMS > 0.005 (hard floor, separate from the user-adjustable threshold)
 
@@ -488,7 +503,7 @@ images/
 
 | Module | Key exports |
 |---|---|
-| `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `NOTE_STATS_FILE`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config` / `save_lesson_stats`, `AudioEngine`, `App` |
+| `music_lessons.py` | Constants (`NOTE_NAMES`, `SHARP_TO_FLAT`, `NOTE_STATS_FILE`, `CANVAS_W/H`, …), utility functions (`parse_note`, `note_to_midi`, `staff_pos`, `same_midi`, …), `load_config` / `save_config` (async write) / `save_lesson_stats(mode, avg_per_min)`, `AudioEngine` (multi-channel with device fallback), `App` |
 | `menu.py` | `MainMenu` — builds the main menu; mic bar; range/mode/duration selectors; Play List section; delegates lesson, playlist, and debug launch |
 | `play_by_staff_location.py` | `StaffLesson(BasLesson)` — scales and renders the treble clef staff, note head, ledger lines, and accidentals |
 | `play_by_note_name.py` | `LettersLesson(BasLesson)` — displays the note name as large bold text |
@@ -506,6 +521,9 @@ images/
 | `_playlist_callback` | callable or None | Set by the playlist runner before `show()`; called by `_complete()` to advance to the next step |
 | `_playlist_next_label` | str or None | Mode name of the next playlist step; used to label the Next button on the completion screen |
 | `_pending_pause` | float | Accumulated pause time to apply when the lesson timer starts (used when `_pause_for_tone` is called before `_start_lesson_timer`) |
+| `_note_times` | list[float] | Response time (seconds) recorded for each correct answer in the current lesson; used to compute `avg_notes_per_min` at completion |
+| `_note_tone_duration` | float | Tone duration to subtract from elapsed time in `_hit()`; set by `_pause_for_tone()` and reset to 0.0 after each hit |
+| `_original_lesson_duration_s` | float | The configured lesson duration at start time; preserved even as `_lesson_duration_s` grows from time refunds |
 
 ### Import strategy
 

@@ -86,9 +86,12 @@ class BasLesson:
         self._seq: list[str]   = []
         self._mode             = ""
         self._bg               = None
-        self._lesson_start_time  = None
-        self._lesson_duration_s  = 0.0
-        self._notes_completed    = 0
+        self._lesson_start_time          = None
+        self._lesson_duration_s          = 0.0
+        self._original_lesson_duration_s = 0.0
+        self._notes_completed            = 0
+        self._note_times                 = []
+        self._note_tone_duration         = 0.0
         self._lesson_ended       = False
         self._period_var         = None
         self._graph_frame        = None
@@ -134,11 +137,14 @@ class BasLesson:
     # ── Lesson timer ──────────────────────────────────────────────────────────
 
     def _start_lesson_timer(self, duration_s):
-        self._lesson_duration_s = duration_s
+        self._lesson_duration_s          = duration_s
+        self._original_lesson_duration_s = duration_s
         self._lesson_start_time = time.monotonic() + self._pending_pause
         self._pending_pause     = 0.0
         self._lesson_ended      = False
         self._notes_completed   = 0
+        self._note_times        = []
+        self._note_tone_duration = 0.0
         self._time_tick()
 
     def _add_time(self, seconds):
@@ -151,6 +157,7 @@ class BasLesson:
     def _pause_for_tone(self):
         """Pause the lesson clock for the tone duration without affecting the lesson's total length."""
         tone_duration = self.app.cfg.get("tone_duration", 1.5)
+        self._note_tone_duration = tone_duration
         if self._lesson_start_time is not None:
             self._lesson_start_time += tone_duration
         else:
@@ -209,7 +216,10 @@ class BasLesson:
             return
         self._notes_completed += 1
         elapsed = time.monotonic() - (self._note_start_time or time.monotonic())
-        update_note_stats(self.app.cfg, self._mode, self._target, elapsed)
+        response_time = max(0.1, elapsed - self._note_tone_duration)
+        self._note_tone_duration = 0.0
+        self._note_times.append(response_time)
+        update_note_stats(self.app.cfg, self._mode, self._target, response_time)
         refund = 0.4  # green flash duration
         if self._note_hold_refund:
             refund += self.app.cfg["note_duration"]
@@ -239,11 +249,13 @@ class BasLesson:
 
     def _complete(self):
         self._lesson_ended = True
-        actual_duration = (
-            time.monotonic() - self._lesson_start_time
-            if self._lesson_start_time else 0.0
-        )
-        save_lesson_stats(self._mode, actual_duration, self._notes_completed)
+        if self._note_times:
+            avg_seconds = sum(self._note_times) / len(self._note_times)
+            avg_per_min = round(60.0 / avg_seconds, 1)
+        else:
+            avg_per_min = 0.0
+
+        save_lesson_stats(self._mode, avg_per_min)
 
         self._bg.config(bg="white")
         for w in self._bg.winfo_children():
@@ -251,9 +263,6 @@ class BasLesson:
                 w.destroy()
             except Exception:
                 pass
-
-        minutes     = actual_duration / 60.0
-        avg_per_min = round(self._notes_completed / minutes, 1) if minutes > 0 else 0.0
 
         tk.Label(self._bg, text="Lesson Complete!", font=("Arial", 36, "bold"),
                  bg="white", fg="#228b22").pack(pady=(10, 2))
