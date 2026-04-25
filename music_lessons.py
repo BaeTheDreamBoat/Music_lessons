@@ -3,6 +3,7 @@
 
 import json
 import os
+import sys
 import time
 import threading
 
@@ -10,11 +11,26 @@ import numpy as np
 import pyaudio
 from PIL import Image
 
+# ─── Path helpers ─────────────────────────────────────────────────────────────
+
+def _resource_path(relative):
+    """Bundled read-only assets (images). Uses _MEIPASS when frozen."""
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative)
+
+def _data_path(relative):
+    """User data files (config, stats). Always next to the executable."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative)
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-CONFIG_FILE     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-NOTE_STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "note_stats.json")
-IMAGES_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+CONFIG_FILE     = _data_path("config.json")
+NOTE_STATS_FILE = _data_path("note_stats.json")
+IMAGES_PATH     = _resource_path("images")
 
 NOTE_NAMES    = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 DIATONIC      = ['C', 'D', 'E', 'F', 'G', 'A', 'B']

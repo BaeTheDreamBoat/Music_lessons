@@ -2,3 +2,6 @@ images/
 config.json
 note_stats.json
 __pycache__/
+build/
+dist/
+*.spec
